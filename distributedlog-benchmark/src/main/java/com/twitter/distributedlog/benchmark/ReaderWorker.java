@@ -17,6 +17,7 @@
  */
 package com.twitter.distributedlog.benchmark;
 
+import com.codahale.metrics.Timer;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -43,8 +44,10 @@ import com.twitter.util.Function;
 import com.twitter.util.Future;
 import com.twitter.util.FutureEventListener;
 import com.twitter.util.Promise;
+import org.apache.bookkeeper.stats.CodahaleUtils;
 import org.apache.bookkeeper.stats.Counter;
 import org.apache.bookkeeper.stats.Gauge;
+import org.apache.bookkeeper.stats.OpStatsData;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.thrift.TException;
@@ -69,6 +72,7 @@ public class ReaderWorker implements Worker {
     final int startStreamId;
     final int endStreamId;
     final ScheduledExecutorService executorService;
+    final ScheduledExecutorService statsReportService;
     final DistributedLogNamespace namespace;
     final DistributedLogManager[] dlms;
     final AsyncLogReader[] logReaders;
@@ -228,6 +232,7 @@ public class ReaderWorker implements Worker {
         this.outOfOrderSequenceIdCounter = this.statsLogger.getCounter("out_of_order_seq_id");
         this.executorService = Executors.newScheduledThreadPool(
                 readThreadPoolSize, new ThreadFactoryBuilder().setNameFormat("benchmark.reader-%d").build());
+        this.statsReportService = Executors.newSingleThreadScheduledExecutor();
         this.finagleNames = finagleNames;
         this.serverSets = createServerSets(serverSetPaths);
 
@@ -310,6 +315,28 @@ public class ReaderWorker implements Worker {
         }
         LOG.info("Initialized benchmark reader on {} streams {} : [{} - {})",
                  new Object[] { numStreams, streamPrefix, startStreamId, endStreamId });
+        this.statsReportService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                OpStatsData opStatsData = e2eStat.toOpStatsData();
+                LOG.info("Write : success = {}, failed = {}, latency = [ p50 = {}, p99 = {}, p999 = {}, p9999 = {}, max = {} ]",
+                        new Object[] {
+                                opStatsData.getNumSuccessfulEvents(),
+                                opStatsData.getNumFailedEvents(),
+                                opStatsData.getP50Latency(),
+                                opStatsData.getP99Latency(),
+                                opStatsData.getP999Latency(),
+                                opStatsData.getP9999Latency()
+                        });
+                Timer successTimer = CodahaleUtils.getSuccessTimer(e2eStat);
+                Timer failureTimer = CodahaleUtils.getFailureTimer(e2eStat);
+                LOG.info("Write : success - 1min = {}, mean = {}; failure - 1min = {}, mean = {}",
+                        new Object[] {
+                                successTimer.getOneMinuteRate(), successTimer.getMeanRate(),
+                                failureTimer.getOneMinuteRate(), failureTimer.getMeanRate()
+                        });
+            }
+        }, 1, 1, TimeUnit.MINUTES);
     }
 
     protected DLZkServerSet[] createServerSets(List<String> serverSetPaths) {

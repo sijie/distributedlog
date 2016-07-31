@@ -17,6 +17,7 @@
  */
 package com.twitter.distributedlog.benchmark;
 
+import com.codahale.metrics.Timer;
 import com.google.common.base.Preconditions;
 
 import com.twitter.common.zookeeper.ServerSet;
@@ -36,6 +37,8 @@ import com.twitter.finagle.thrift.ClientId;
 import com.twitter.util.Duration$;
 import com.twitter.util.Future;
 import com.twitter.util.FutureEventListener;
+import org.apache.bookkeeper.stats.CodahaleUtils;
+import org.apache.bookkeeper.stats.OpStatsData;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.thrift.TException;
@@ -50,6 +53,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class WriterWorker implements Worker {
@@ -64,6 +68,7 @@ public class WriterWorker implements Worker {
     final int hostConnectionCoreSize;
     final int hostConnectionLimit;
     final ExecutorService executorService;
+    final ScheduledExecutorService statsReportService;
     final ShiftableRateLimiter rateLimiter;
     final DLZkServerSet[] serverSets;
     final List<String> finagleNames;
@@ -117,6 +122,7 @@ public class WriterWorker implements Worker {
         this.exceptionsLogger = statsLogger.scope("exceptions");
         this.dlErrorCodeLogger = statsLogger.scope("dl_error_code");
         this.executorService = Executors.newCachedThreadPool();
+        this.statsReportService = Executors.newSingleThreadScheduledExecutor();
         this.random = new Random(System.currentTimeMillis());
         this.batchSize = batchSize;
         this.hostConnectionCoreSize = hostConnectionCoreSize;
@@ -136,6 +142,28 @@ public class WriterWorker implements Worker {
         }
         numStreams = streamNames.size();
         LOG.info("Writing to {} streams : {}", numStreams, streamNames);
+        this.statsReportService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                OpStatsData opStatsData = requestStat.toOpStatsData();
+                LOG.info("Write : success = {}, failed = {}, latency = [ p50 = {}, p99 = {}, p999 = {}, p9999 = {}, max = {} ]",
+                        new Object[] {
+                                opStatsData.getNumSuccessfulEvents(),
+                                opStatsData.getNumFailedEvents(),
+                                opStatsData.getP50Latency(),
+                                opStatsData.getP99Latency(),
+                                opStatsData.getP999Latency(),
+                                opStatsData.getP9999Latency()
+                        });
+                Timer successTimer = CodahaleUtils.getSuccessTimer(requestStat);
+                Timer failureTimer = CodahaleUtils.getFailureTimer(requestStat);
+                LOG.info("Write : success - 1min = {}, mean = {}; failure - 1min = {}, mean = {}",
+                        new Object[] {
+                                successTimer.getOneMinuteRate(), successTimer.getMeanRate(),
+                                failureTimer.getOneMinuteRate(), failureTimer.getMeanRate()
+                        });
+            }
+        }, 1, 1, TimeUnit.MINUTES);
     }
 
     protected DLZkServerSet[] createServerSets(List<String> serverSetPaths) {
@@ -151,6 +179,7 @@ public class WriterWorker implements Worker {
     public void close() throws IOException {
         this.running = false;
         SchedulerUtils.shutdownScheduler(this.executorService, 2, TimeUnit.MINUTES);
+        SchedulerUtils.shutdownScheduler(this.statsReportService, 2, TimeUnit.MINUTES);
         for (DLZkServerSet serverSet: serverSets) {
             serverSet.close();
         }
