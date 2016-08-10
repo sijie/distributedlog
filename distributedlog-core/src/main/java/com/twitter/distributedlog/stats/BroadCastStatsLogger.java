@@ -136,6 +136,16 @@ public class BroadCastStatsLogger {
         public StatsLogger scope(final String scope) {
             return new Two(first.scope(scope), second.scope(scope));
         }
+
+        @Override
+        public void removeScope(String s, StatsLogger statsLogger) {
+            // no-op
+        }
+
+        @Override
+        public <T extends Number> void unregisterGauge(String s, Gauge<T> gauge) {
+            // no-op
+        }
     }
 
     /**

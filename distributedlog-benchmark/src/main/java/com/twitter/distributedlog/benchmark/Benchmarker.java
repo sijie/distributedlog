@@ -22,6 +22,8 @@ import com.twitter.distributedlog.DistributedLogConfiguration;
 import com.twitter.distributedlog.benchmark.utils.ShiftableRateLimiter;
 import com.twitter.finagle.stats.OstrichStatsReceiver;
 import com.twitter.finagle.stats.StatsReceiver;
+import org.apache.bookkeeper.bookie.JournalWorker;
+import org.apache.bookkeeper.conf.ServerConfiguration;
 import org.apache.bookkeeper.stats.NullStatsProvider;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.bookkeeper.stats.StatsProvider;
@@ -81,6 +83,7 @@ public class Benchmarker {
     boolean enableBatching = false;
 
     final DistributedLogConfiguration conf = new DistributedLogConfiguration();
+    final ServerConfiguration bkConf = new ServerConfiguration();
     final StatsReceiver statsReceiver = new OstrichStatsReceiver();
     StatsProvider statsProvider = null;
 
@@ -90,6 +93,7 @@ public class Benchmarker {
         options.addOption("s", "serverset", true, "Proxy Server Set (separated by ',')");
         options.addOption("fn", "finagle-name", true, "Write proxy finagle name (separated by ',')");
         options.addOption("c", "conf", true, "DistributedLog Configuration File");
+        options.addOption("bc", "bookie-conf", true, "Bookie Configuration File");
         options.addOption("u", "uri", true, "DistributedLog URI");
         options.addOption("i", "shard", true, "Shard Id");
         options.addOption("p", "provider", true, "DistributedLog Stats Provider");
@@ -186,6 +190,10 @@ public class Benchmarker {
             String configFile = cmdline.getOptionValue("c");
             conf.loadConf(new File(configFile).toURI().toURL());
         }
+        if (cmdline.hasOption("bc")) {
+            String configFile = cmdline.getOptionValue("bc");
+            bkConf.loadConf(new File(configFile).toURI().toURL());
+        }
         if (cmdline.hasOption("rps")) {
             readersPerStream = Integer.parseInt(cmdline.getOptionValue("rps"));
         }
@@ -243,6 +251,8 @@ public class Benchmarker {
             w = runDLWriter();
         } else if (mode.startsWith("dlread")) {
             w = runDLReader();
+        } else if (mode.startsWith("journal")) {
+            w = runJournal();
         }
 
         if (w == null) {
@@ -357,6 +367,19 @@ public class Benchmarker {
                 concurrency,
                 msgSize,
                 statsProvider.getStatsLogger("dlwrite"));
+    }
+
+    Worker runJournal() throws IOException {
+        Preconditions.checkArgument(rate > 0, "rate must be greater than 0");
+        Preconditions.checkArgument(maxRate >= rate, "max rate must be greater than rate");
+        Preconditions.checkArgument(changeRate >= 0, "change rate must be positive");
+        Preconditions.checkArgument(changeRateSeconds >= 0, "change rate must be positive");
+        Preconditions.checkArgument(concurrency > 0, "concurrency must be greater than 0");
+
+        ShiftableRateLimiter rateLimiter =
+                new ShiftableRateLimiter(rate, maxRate, changeRate, changeRateSeconds, TimeUnit.SECONDS);
+
+        return new JournalWorker(bkConf, rateLimiter, concurrency, msgSize, statsProvider.getStatsLogger("journal"));
     }
 
     Worker runReader() throws IOException {
