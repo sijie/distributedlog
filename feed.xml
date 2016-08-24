@@ -4,10 +4,10 @@
     <title>Apache DistributedLog (incubating)</title>
     <description>Apache DistributedLog is an high performance replicated log.
 </description>
-    <link>http://distributedlog.incubator.apache.org/</link>
-    <atom:link href="http://distributedlog.incubator.apache.org/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Mon, 22 Aug 2016 09:26:32 -0700</pubDate>
-    <lastBuildDate>Mon, 22 Aug 2016 09:26:32 -0700</lastBuildDate>
+    <link>http://distributedlog.incubator.apache.orghttps://sijie.github.io/incubator-distributedlog//</link>
+    <atom:link href="http://distributedlog.incubator.apache.orghttps://sijie.github.io/incubator-distributedlog//feed.xml" rel="self" type="application/rss+xml"/>
+    <pubDate>Tue, 23 Aug 2016 21:38:37 -0700</pubDate>
+    <lastBuildDate>Tue, 23 Aug 2016 21:38:37 -0700</lastBuildDate>
     <generator>Jekyll v3.2.1</generator>
     
   </channel>
