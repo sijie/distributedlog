@@ -19,6 +19,8 @@ package com.twitter.distributedlog.benchmark;
 
 import com.google.common.base.Preconditions;
 import com.twitter.distributedlog.DistributedLogConfiguration;
+import com.twitter.distributedlog.benchmark.kafka.KafkaPublisherWorker;
+import com.twitter.distributedlog.benchmark.kafka.KafkaSubscriberWorker;
 import com.twitter.distributedlog.benchmark.utils.ShiftableRateLimiter;
 import com.twitter.finagle.stats.OstrichStatsReceiver;
 import com.twitter.finagle.stats.StatsReceiver;
@@ -31,15 +33,19 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.lang.StringUtils;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
 public class Benchmarker {
@@ -79,9 +85,12 @@ public class Benchmarker {
     int sendBufferSize = 1024 * 1024;
     int recvBufferSize = 1024 * 1024;
     boolean enableBatching = false;
+    int batchBufferSize = 256 * 1024;
+    int batchFlushIntervalMicros = 2000;
 
     final DistributedLogConfiguration conf = new DistributedLogConfiguration();
     final StatsReceiver statsReceiver = new OstrichStatsReceiver();
+    final Properties kafkaProps = new Properties();
     StatsProvider statsProvider = null;
 
     Benchmarker(String[] args) {
@@ -90,6 +99,7 @@ public class Benchmarker {
         options.addOption("s", "serverset", true, "Proxy Server Set (separated by ',')");
         options.addOption("fn", "finagle-name", true, "Write proxy finagle name (separated by ',')");
         options.addOption("c", "conf", true, "DistributedLog Configuration File");
+        options.addOption("kc", "kafka-conf", true, "Kafka Configuration File");
         options.addOption("u", "uri", true, "DistributedLog URI");
         options.addOption("i", "shard", true, "Shard Id");
         options.addOption("p", "provider", true, "DistributedLog Stats Provider");
@@ -116,7 +126,9 @@ public class Benchmarker {
         options.addOption("rfh", "read-from-head", false, "Read from head of the stream");
         options.addOption("sb", "send-buffer", true, "Channel send buffer size, in bytes");
         options.addOption("rb", "recv-buffer", true, "Channel recv buffer size, in bytes");
-        options.addOption("bt", "enable-batch", true, "Enable batching on writers");
+        options.addOption("bt", "enable-batch", false, "Enable batching on writers");
+        options.addOption("bbs", "batch-buffer-size", true, "The batch buffer size in bytes");
+        options.addOption("bfi", "batch-flush-interval", true, "The batch buffer flush interval in micros");
         options.addOption("h", "help", false, "Print usage.");
     }
 
@@ -186,6 +198,10 @@ public class Benchmarker {
             String configFile = cmdline.getOptionValue("c");
             conf.loadConf(new File(configFile).toURI().toURL());
         }
+        if (cmdline.hasOption("kc")) {
+            String configFile = cmdline.getOptionValue("kc");
+            kafkaProps.load(new FileInputStream(new File(configFile)));
+        }
         if (cmdline.hasOption("rps")) {
             readersPerStream = Integer.parseInt(cmdline.getOptionValue("rps"));
         }
@@ -217,6 +233,17 @@ public class Benchmarker {
         handshakeWithClientInfo = cmdline.hasOption("hsci");
         readFromHead = cmdline.hasOption("rfh");
         enableBatching = cmdline.hasOption("bt");
+        if (cmdline.hasOption("bbs")) {
+            batchBufferSize = Integer.parseInt(cmdline.getOptionValue("bbs"));
+        }
+        if (cmdline.hasOption("bfi")) {
+            batchFlushIntervalMicros = Integer.parseInt(cmdline.getOptionValue("bfi"));
+        }
+
+        kafkaProps.put(ProducerConfig.LINGER_MS_CONFIG, (batchFlushIntervalMicros / 1000));
+        kafkaProps.put(ProducerConfig.SEND_BUFFER_CONFIG, sendBufferSize);
+        kafkaProps.put(ConsumerConfig.RECEIVE_BUFFER_CONFIG, recvBufferSize);
+        kafkaProps.put(ConsumerConfig.CHECK_CRCS_CONFIG, "true");
 
         Preconditions.checkArgument(shardId >= 0, "shardId must be >= 0");
         Preconditions.checkArgument(numStreams > 0, "numStreams must be > 0");
@@ -243,6 +270,10 @@ public class Benchmarker {
             w = runDLWriter();
         } else if (mode.startsWith("dlread")) {
             w = runDLReader();
+        } else if (mode.startsWith("kafkawrite")) {
+            w = runKafkaPublisher();
+        } else if (mode.startsWith("kafkaread")) {
+            w = runKafkaSubscriber();
         }
 
         if (w == null) {
@@ -262,6 +293,26 @@ public class Benchmarker {
         }
 
         Runtime.getRuntime().exit(0);
+    }
+
+    Worker runKafkaPublisher() {
+        Preconditions.checkArgument(msgSize > 0, "messagesize must be greater than 0");
+        Preconditions.checkArgument(rate > 0, "rate must be greater than 0");
+        Preconditions.checkArgument(maxRate >= rate, "max rate must be greater than rate");
+        Preconditions.checkArgument(changeRate >= 0, "change rate must be positive");
+        Preconditions.checkArgument(changeRateSeconds >= 0, "change rate must be positive");
+        Preconditions.checkArgument(concurrency > 0, "concurrency must be greater than 0");
+
+        ShiftableRateLimiter rateLimiter =
+                new ShiftableRateLimiter(rate, maxRate, changeRate, changeRateSeconds, TimeUnit.SECONDS);
+        return new KafkaPublisherWorker(
+                streamPrefix,
+                numStreams,
+                kafkaProps,
+                rateLimiter,
+                concurrency,
+                msgSize,
+                statsProvider.getStatsLogger("write"));
     }
 
     Worker runWriter() {
@@ -295,7 +346,9 @@ public class Benchmarker {
                 handshakeWithClientInfo,
                 sendBufferSize,
                 recvBufferSize,
-                enableBatching);
+                enableBatching,
+                batchBufferSize,
+                batchFlushIntervalMicros);
     }
 
     protected WriterWorker createWriteWorker(
@@ -317,7 +370,9 @@ public class Benchmarker {
             boolean handshakeWithClientInfo,
             int sendBufferSize,
             int recvBufferSize,
-            boolean enableBatching) {
+            boolean enableBatching,
+            int batchBufferSize,
+            int batchFlushIntervalMicros) {
         return new WriterWorker(
                 streamPrefix,
                 uri,
@@ -337,7 +392,9 @@ public class Benchmarker {
                 handshakeWithClientInfo,
                 sendBufferSize,
                 recvBufferSize,
-                enableBatching);
+                enableBatching,
+                batchBufferSize,
+                batchFlushIntervalMicros);
     }
 
     Worker runDLWriter() throws IOException {
@@ -360,6 +417,15 @@ public class Benchmarker {
                 concurrency,
                 msgSize,
                 statsProvider.getStatsLogger("dlwrite"));
+    }
+
+    Worker runKafkaSubscriber() throws IOException {
+        Preconditions.checkArgument(concurrency > 0, "concurrency must be greater than 0");
+        return new KafkaSubscriberWorker(
+                streamPrefix,
+                kafkaProps,
+                readFromHead,
+                statsProvider.getStatsLogger("dlreader"));
     }
 
     Worker runReader() throws IOException {

@@ -17,6 +17,7 @@
  */
 package com.twitter.distributedlog.benchmark;
 
+import com.codahale.metrics.Timer;
 import com.google.common.base.Preconditions;
 import com.twitter.distributedlog.AsyncLogWriter;
 import com.twitter.distributedlog.DLSN;
@@ -29,6 +30,8 @@ import com.twitter.distributedlog.namespace.DistributedLogNamespaceBuilder;
 import com.twitter.distributedlog.util.FutureUtils;
 import com.twitter.distributedlog.util.SchedulerUtils;
 import com.twitter.util.FutureEventListener;
+import org.apache.bookkeeper.stats.CodahaleUtils;
+import org.apache.bookkeeper.stats.OpStatsData;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.thrift.TException;
@@ -139,6 +142,28 @@ public class DLWriterWorker implements Worker {
             streamWriters.add(writer);
         }
         LOG.info("Writing to {} streams.", numStreams);
+        this.rescueService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                OpStatsData opStatsData = requestStat.toOpStatsData();
+                LOG.info("Write : success = {}, failed = {}, latency = [ p50 = {}, p99 = {}, p999 = {}, p9999 = {}, max = {} ]",
+                        new Object[] {
+                                opStatsData.getNumSuccessfulEvents(),
+                                opStatsData.getNumFailedEvents(),
+                                opStatsData.getP50Latency(),
+                                opStatsData.getP99Latency(),
+                                opStatsData.getP999Latency(),
+                                opStatsData.getP9999Latency()
+                        });
+                Timer successTimer = CodahaleUtils.getSuccessTimer(requestStat);
+                Timer failureTimer = CodahaleUtils.getFailureTimer(requestStat);
+                LOG.info("Write : success - 1min = {}, mean = {}; failure - 1min = {}, mean = {}",
+                        new Object[] {
+                                successTimer.getOneMinuteRate(), successTimer.getMeanRate(),
+                                failureTimer.getOneMinuteRate(), failureTimer.getMeanRate()
+                        });
+            }
+        }, 1, 1, TimeUnit.MINUTES);
     }
 
     void rescueWriter(int idx, AsyncLogWriter writer) {

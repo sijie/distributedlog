@@ -17,6 +17,7 @@
  */
 package com.twitter.distributedlog.benchmark;
 
+import com.codahale.metrics.Timer;
 import com.google.common.base.Preconditions;
 
 import com.twitter.common.zookeeper.ServerSet;
@@ -36,6 +37,8 @@ import com.twitter.finagle.thrift.ClientId;
 import com.twitter.util.Duration$;
 import com.twitter.util.Future;
 import com.twitter.util.FutureEventListener;
+import org.apache.bookkeeper.stats.CodahaleUtils;
+import org.apache.bookkeeper.stats.OpStatsData;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.thrift.TException;
@@ -50,6 +53,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class WriterWorker implements Worker {
@@ -64,6 +68,7 @@ public class WriterWorker implements Worker {
     final int hostConnectionCoreSize;
     final int hostConnectionLimit;
     final ExecutorService executorService;
+    final ScheduledExecutorService statsReportService;
     final ShiftableRateLimiter rateLimiter;
     final URI dlUri;
     final DLZkServerSet[] serverSets;
@@ -77,6 +82,8 @@ public class WriterWorker implements Worker {
     final int sendBufferSize;
     final int recvBufferSize;
     final boolean enableBatching;
+    final int batchBufferSize;
+    final int batchFlushIntervalMicros;
 
     volatile boolean running = true;
 
@@ -85,6 +92,9 @@ public class WriterWorker implements Worker {
     final OpStatsLogger requestStat;
     final StatsLogger exceptionsLogger;
     final StatsLogger dlErrorCodeLogger;
+
+    // callback thread
+    final ExecutorService executor;
 
     public WriterWorker(String streamPrefix,
                         URI uri,
@@ -104,7 +114,9 @@ public class WriterWorker implements Worker {
                         boolean handshakeWithClientInfo,
                         int sendBufferSize,
                         int recvBufferSize,
-                        boolean enableBatching) {
+                        boolean enableBatching,
+                        int batchBufferSize,
+                        int batchFlushIntervalMicros) {
         Preconditions.checkArgument(startStreamId <= endStreamId);
         Preconditions.checkArgument(!finagleNames.isEmpty() || !serverSetPaths.isEmpty());
         this.streamPrefix = streamPrefix;
@@ -120,6 +132,7 @@ public class WriterWorker implements Worker {
         this.exceptionsLogger = statsLogger.scope("exceptions");
         this.dlErrorCodeLogger = statsLogger.scope("dl_error_code");
         this.executorService = Executors.newCachedThreadPool();
+        this.statsReportService = Executors.newSingleThreadScheduledExecutor();
         this.random = new Random(System.currentTimeMillis());
         this.batchSize = batchSize;
         this.hostConnectionCoreSize = hostConnectionCoreSize;
@@ -129,8 +142,11 @@ public class WriterWorker implements Worker {
         this.sendBufferSize = sendBufferSize;
         this.recvBufferSize = recvBufferSize;
         this.enableBatching = enableBatching;
+        this.batchBufferSize = batchBufferSize;
+        this.batchFlushIntervalMicros = batchFlushIntervalMicros;
         this.finagleNames = finagleNames;
         this.serverSets = createServerSets(serverSetPaths);
+        this.executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
         // Streams
         streamNames = new ArrayList<String>(endStreamId - startStreamId);
@@ -139,6 +155,28 @@ public class WriterWorker implements Worker {
         }
         numStreams = streamNames.size();
         LOG.info("Writing to {} streams : {}", numStreams, streamNames);
+        this.statsReportService.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                OpStatsData opStatsData = requestStat.toOpStatsData();
+                LOG.info("Write : success = {}, failed = {}, latency = [ p50 = {}, p99 = {}, p999 = {}, p9999 = {}, max = {} ]",
+                        new Object[] {
+                                opStatsData.getNumSuccessfulEvents(),
+                                opStatsData.getNumFailedEvents(),
+                                opStatsData.getP50Latency(),
+                                opStatsData.getP99Latency(),
+                                opStatsData.getP999Latency(),
+                                opStatsData.getP9999Latency()
+                        });
+                Timer successTimer = CodahaleUtils.getSuccessTimer(requestStat);
+                Timer failureTimer = CodahaleUtils.getFailureTimer(requestStat);
+                LOG.info("Write : success - 1min = {}, mean = {}; failure - 1min = {}, mean = {}",
+                        new Object[] {
+                                successTimer.getOneMinuteRate(), successTimer.getMeanRate(),
+                                failureTimer.getOneMinuteRate(), failureTimer.getMeanRate()
+                        });
+            }
+        }, 1, 1, TimeUnit.MINUTES);
     }
 
     protected DLZkServerSet[] createServerSets(List<String> serverSetPaths) {
@@ -154,6 +192,7 @@ public class WriterWorker implements Worker {
     public void close() throws IOException {
         this.running = false;
         SchedulerUtils.shutdownScheduler(this.executorService, 2, TimeUnit.MINUTES);
+        SchedulerUtils.shutdownScheduler(this.statsReportService, 2, TimeUnit.MINUTES);
         for (DLZkServerSet serverSet: serverSets) {
             serverSet.close();
         }
@@ -165,7 +204,7 @@ public class WriterWorker implements Worker {
             .hostConnectionCoresize(hostConnectionCoreSize)
             .tcpConnectTimeout(Duration$.MODULE$.fromMilliseconds(200))
             .connectTimeout(Duration$.MODULE$.fromMilliseconds(200))
-            .requestTimeout(Duration$.MODULE$.fromSeconds(2))
+            .requestTimeout(Duration$.MODULE$.fromSeconds(10))
             .sendBufferSize(sendBufferSize)
             .recvBufferSize(recvBufferSize);
 
@@ -177,7 +216,7 @@ public class WriterWorker implements Worker {
             .thriftmux(thriftmux)
             .redirectBackoffStartMs(100)
             .redirectBackoffMaxMs(500)
-            .requestTimeoutMs(2000)
+            .requestTimeoutMs(10000)
             .statsReceiver(statsReceiver)
             .streamNameRegex("^" + streamPrefix + "_[0-9]+$")
             .handshakeWithClientInfo(handshakeWithClientInfo)
@@ -230,9 +269,12 @@ public class WriterWorker implements Worker {
         return bufferList;
     }
 
-    class TimedRequestHandler implements FutureEventListener<DLSN> {
+    class TimedRequestHandler implements FutureEventListener<DLSN>, Runnable {
         final String streamName;
         final long requestMillis;
+        DLSN dlsn = null;
+        Throwable cause = null;
+
         TimedRequestHandler(String streamName,
                             long requestMillis) {
             this.streamName = streamName;
@@ -240,16 +282,27 @@ public class WriterWorker implements Worker {
         }
         @Override
         public void onSuccess(DLSN value) {
-            requestStat.registerSuccessfulEvent(System.currentTimeMillis() - requestMillis);
+            dlsn = value;
+            executor.submit(this);
         }
         @Override
         public void onFailure(Throwable cause) {
-            LOG.error("Failed to publish to {} : ", streamName, cause);
-            requestStat.registerFailedEvent(System.currentTimeMillis() - requestMillis);
-            exceptionsLogger.getCounter(cause.getClass().getName()).inc();
-            if (cause instanceof DLException) {
-                DLException dle = (DLException) cause;
-                dlErrorCodeLogger.getCounter(dle.getCode().toString()).inc();
+            this.cause = cause;
+            executor.submit(this);
+        }
+
+        @Override
+        public void run() {
+            if (null != dlsn) {
+                requestStat.registerSuccessfulEvent(System.currentTimeMillis() - requestMillis);
+            } else {
+                LOG.error("Failed to publish to {} : ", streamName, cause);
+                requestStat.registerFailedEvent(System.currentTimeMillis() - requestMillis);
+                exceptionsLogger.getCounter(cause.getClass().getName()).inc();
+                if (cause instanceof DLException) {
+                    DLException dle = (DLException) cause;
+                    dlErrorCodeLogger.getCounter(dle.getCode().toString()).inc();
+                }
             }
         }
     }
@@ -259,6 +312,7 @@ public class WriterWorker implements Worker {
         final int idx;
         final DistributedLogClient dlc;
         DistributedLogMultiStreamWriter writer = null;
+        final ShiftableRateLimiter limiter;
 
         Writer(int idx) {
             this.idx = idx;
@@ -268,20 +322,22 @@ public class WriterWorker implements Worker {
                         .client(this.dlc)
                         .streams(streamNames)
                         .compressionCodec(CompressionCodec.Type.NONE)
-                        .flushIntervalMs(20)
-                        .bufferSize(64 * 1024)
-                        .firstSpeculativeTimeoutMs(50)
-                        .maxSpeculativeTimeoutMs(200)
+                        .flushIntervalMicros(batchFlushIntervalMicros)
+                        .bufferSize(batchBufferSize)
+                        .firstSpeculativeTimeoutMs(9000)
+                        .maxSpeculativeTimeoutMs(9000)
+                        .requestTimeoutMs(10000)
                         .speculativeBackoffMultiplier(2)
                         .build();
             }
+            this.limiter = rateLimiter.duplicate();
         }
 
         @Override
         public void run() {
             LOG.info("Started writer {}.", idx);
             while (running) {
-                rateLimiter.getLimiter().acquire();
+                this.limiter.getLimiter().acquire();
                 final String streamName = streamNames.get(random.nextInt(numStreams));
                 final long requestMillis = System.currentTimeMillis();
                 final ByteBuffer data = buildBuffer(requestMillis, messageSizeBytes);
@@ -337,14 +393,18 @@ public class WriterWorker implements Worker {
     public void run() {
         LOG.info("Starting writer (concurrency = {}, prefix = {}, batchSize = {})",
                  new Object[] { writeConcurrency, streamPrefix, batchSize });
-        for (int i = 0; i < writeConcurrency; i++) {
-            Runnable writer = null;
-            if (batchSize > 0) {
-                writer = new BulkWriter(i);
-            } else {
-                writer = new Writer(i);
+        try {
+            for (int i = 0; i < writeConcurrency; i++) {
+                Runnable writer = null;
+                if (batchSize > 0) {
+                    writer = new BulkWriter(i);
+                } else {
+                    writer = new Writer(i);
+                }
+                executorService.submit(writer);
             }
-            executorService.submit(writer);
+        } catch (Throwable t) {
+            LOG.error("Unhandled exception caught", t);
         }
     }
 }
