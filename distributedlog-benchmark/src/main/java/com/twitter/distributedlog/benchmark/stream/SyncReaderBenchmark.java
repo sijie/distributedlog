@@ -116,6 +116,9 @@ public class SyncReaderBenchmark extends AbstractReaderBenchmark {
             LogRecord record;
             boolean nonBlocking = false;
             stopwatch = Stopwatch.createUnstarted();
+            long numCatchupReads = 0L;
+            long numCatchupBytes = 0L;
+            Stopwatch catchupStopwatch = Stopwatch.createStarted();
             while (true) {
                 try {
                     stopwatch.start();
@@ -125,6 +128,8 @@ public class SyncReaderBenchmark extends AbstractReaderBenchmark {
                         if (nonBlocking) {
                             nonBlockingReadStats.registerSuccessfulEvent(elapsedMicros);
                         } else {
+                            numCatchupBytes += record.getPayload().length;
+                            ++numCatchupReads;
                             blockingReadStats.registerSuccessfulEvent(elapsedMicros);
                         }
                         lastTxId = record.getTransactionId();
@@ -133,6 +138,9 @@ public class SyncReaderBenchmark extends AbstractReaderBenchmark {
                     }
                     if (null == record && !nonBlocking) {
                         nonBlocking = true;
+                        catchupStopwatch.stop();
+                        logger.info("Catchup {} records (total {} bytes) in {} milliseconds",
+                                new Object[] { numCatchupReads, numCatchupBytes, stopwatch.elapsed(TimeUnit.MILLISECONDS) });
                     }
                     stopwatch.reset();
                 } catch (IOException e) {
