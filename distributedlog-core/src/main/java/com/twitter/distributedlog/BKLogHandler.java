@@ -25,7 +25,7 @@ import com.twitter.distributedlog.exceptions.LogEmptyException;
 import com.twitter.distributedlog.exceptions.LogNotFoundException;
 import com.twitter.distributedlog.exceptions.LogSegmentNotFoundException;
 import com.twitter.distributedlog.exceptions.UnexpectedException;
-import com.twitter.distributedlog.impl.metadata.ZKLogMetadata;
+import com.twitter.distributedlog.metadata.LogMetadata;
 import com.twitter.distributedlog.io.AsyncAbortable;
 import com.twitter.distributedlog.io.AsyncCloseable;
 import com.twitter.distributedlog.logsegment.LogSegmentMetadataCache;
@@ -89,7 +89,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public abstract class BKLogHandler implements AsyncCloseable, AsyncAbortable {
     static final Logger LOG = LoggerFactory.getLogger(BKLogHandler.class);
 
-    protected final ZKLogMetadata logMetadata;
+    protected final LogMetadata logMetadata;
     protected final DistributedLogConfiguration conf;
     protected final BookKeeperClient bookKeeperClient;
     protected final LogStreamMetadataStore streamMetadataStore;
@@ -122,7 +122,7 @@ public abstract class BKLogHandler implements AsyncCloseable, AsyncAbortable {
     /**
      * Construct a Bookkeeper journal manager.
      */
-    BKLogHandler(ZKLogMetadata metadata,
+    BKLogHandler(LogMetadata metadata,
                  DistributedLogConfiguration conf,
                  BookKeeperClientBuilder bkcBuilder,
                  LogStreamMetadataStore streamMetadataStore,

@@ -23,6 +23,7 @@ import com.twitter.distributedlog.metadata.DLMetadata;
 import com.google.common.collect.Lists;
 import com.twitter.distributedlog.DLMTestUtil;
 import com.twitter.distributedlog.DistributedLogConfiguration;
+import com.twitter.distributedlog.metadata.LogMetadataForWriter;
 import com.twitter.distributedlog.namespace.DistributedLogNamespace;
 import com.twitter.distributedlog.namespace.DistributedLogNamespaceBuilder;
 import com.twitter.distributedlog.DistributedLogManager;
@@ -47,7 +48,7 @@ import org.junit.rules.TestName;
 import java.net.URI;
 import java.util.List;
 
-import static com.twitter.distributedlog.impl.metadata.ZKLogMetadata.*;
+import static com.twitter.distributedlog.metadata.LogMetadata.*;
 import static com.twitter.distributedlog.impl.metadata.ZKLogStreamMetadataStore.*;
 import static org.junit.Assert.*;
 
@@ -149,7 +150,7 @@ public class TestZKLogStreamMetadataStore extends ZooKeeperClusterTestCase {
             zkc.get().delete(path, -1);
         }
 
-        ZKLogMetadataForWriter logMetadata =
+        LogMetadataForWriter logMetadata =
                 FutureUtils.result(getLog(uri, logName, logIdentifier, zkc, ownAllocator, true));
 
         final String logRootPath = getLogRootPath(uri, logName, logIdentifier);
