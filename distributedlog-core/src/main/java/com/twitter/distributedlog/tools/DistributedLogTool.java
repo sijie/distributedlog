@@ -2730,7 +2730,6 @@ public class DistributedLogTool extends Tool {
         int numThreads = 1;
         String streamPrefix = null;
         String subscriberId = null;
-        AtomicInteger streamIndex = new AtomicInteger();
 
         DeleteSubscriberCommand() {
             super("delete_subscriber", "Delete the subscriber in subscription store. ");
