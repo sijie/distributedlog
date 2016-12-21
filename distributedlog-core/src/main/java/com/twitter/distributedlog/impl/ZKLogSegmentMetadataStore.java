@@ -19,10 +19,10 @@ package com.twitter.distributedlog.impl;
 
 import com.google.common.collect.ImmutableList;
 import com.twitter.distributedlog.DistributedLogConfiguration;
-import com.twitter.distributedlog.LogNotFoundException;
 import com.twitter.distributedlog.LogSegmentMetadata;
 import com.twitter.distributedlog.ZooKeeperClient;
 import com.twitter.distributedlog.callback.LogSegmentNamesListener;
+import com.twitter.distributedlog.exceptions.LogNotFoundException;
 import com.twitter.distributedlog.exceptions.ZKException;
 import com.twitter.distributedlog.logsegment.LogSegmentMetadataStore;
 import com.twitter.distributedlog.util.DLUtils;
@@ -374,7 +374,9 @@ public class ZKLogSegmentMetadataStore implements LogSegmentMetadataStore, Watch
                         listenerSet.put(listener, new VersionedLogSegmentNamesListener(listener));
                         if (!listeners.containsKey(logSegmentsPath)) {
                             // listener set has been removed, add it back
-                            listeners.putIfAbsent(logSegmentsPath, listenerSet);
+                            if (null != listeners.putIfAbsent(logSegmentsPath, listenerSet)) {
+                                logger.debug("Listener set is already found for log segments path {}", logSegmentsPath);
+                            }
                         }
                     }
                     zkWatcher = ZKLogSegmentMetadataStore.this;
