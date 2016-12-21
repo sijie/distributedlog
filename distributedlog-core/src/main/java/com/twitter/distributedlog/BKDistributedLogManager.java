@@ -433,7 +433,9 @@ class BKDistributedLogManager extends ZKMetadataAccessor implements DistributedL
             readHandlerForListener.asyncStartFetchLogSegments();
             return readHandlerForListener;
         }
-        readHandlerForListener.registerListener(listener);
+        if (null != readHandlerForListener && null != listener) {
+            readHandlerForListener.registerListener(listener);
+        }
         return readHandlerForListener;
     }
 
