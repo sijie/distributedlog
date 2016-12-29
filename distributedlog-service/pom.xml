@@ -44,6 +44,13 @@
     </dependency>
     <dependency>
       <groupId>com.twitter</groupId>
+      <artifactId>distributedlog-protocol</artifactId>
+      <version>${project.parent.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.twitter</groupId>
       <artifactId>finagle-ostrich4_2.11</artifactId>
       <version>${birdcage.sha}</version>
     </dependency>

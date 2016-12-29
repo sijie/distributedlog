@@ -135,6 +135,13 @@
       <version>${project.parent.version}</version>
     </dependency>
     <dependency>
+      <groupId>com.twitter</groupId>
+      <artifactId>distributedlog-protocol</artifactId>
+      <version>${project.parent.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>net.jpountz.lz4</groupId>
       <artifactId>lz4</artifactId>
       <version>1.2.0</version>
