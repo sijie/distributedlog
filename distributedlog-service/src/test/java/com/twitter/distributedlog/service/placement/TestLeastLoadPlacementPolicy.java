@@ -131,7 +131,10 @@ public class TestLeastLoadPlacementPolicy {
         highestLoadSeen = load;
       }
     }
-    assertTrue(highestLoadSeen - lowestLoadSeen < maxLoad.get());
+    assertTrue("Unexpected placement for " + numStreams + " streams to "
+            + numSevers + " servers : highest load = " + highestLoadSeen
+            + ", lowest load = " + lowestLoadSeen + ", max stream load = " + maxLoad.get(),
+            highestLoadSeen - lowestLoadSeen < maxLoad.get());
   }
 
   private Set<SocketAddress> generateSocketAddresses(int num) {
