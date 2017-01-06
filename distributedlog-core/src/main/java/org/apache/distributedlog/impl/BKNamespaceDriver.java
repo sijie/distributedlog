@@ -222,11 +222,18 @@ public class BKNamespaceDriver implements NamespaceDriver {
     }
 
     private void initializeZooKeeperClients() throws IOException {
+        RetryPolicy retryPolicy = null;
+        if (conf.getZKNumRetries() > 0) {
+            retryPolicy = new BoundExponentialBackoffRetryPolicy(
+                conf.getZKRetryBackoffStartMillis(),
+                conf.getZKRetryBackoffMaxMillis(), conf.getZKNumRetries());
+        }
         // Build the namespace zookeeper client
         this.sharedWriterZKCBuilder = createZKClientBuilder(
                 String.format("dlzk:%s:factory_writer_shared", namespace),
                 conf,
                 getZKServersFromDLUri(namespace),
+                retryPolicy,
                 statsLogger.scope("dlzk_factory_writer_shared"));
         this.writerZKC = sharedWriterZKCBuilder.build();
 
@@ -241,6 +248,7 @@ public class BKNamespaceDriver implements NamespaceDriver {
                     String.format("dlzk:%s:factory_reader_shared", namespace),
                     conf,
                     bkdlConfig.getDlZkServersForReader(),
+                    retryPolicy,
                     statsLogger.scope("dlzk_factory_reader_shared"));
         }
         this.readerZKC = this.sharedReaderZKCBuilder.build();
@@ -555,13 +563,8 @@ public class BKNamespaceDriver implements NamespaceDriver {
     public static ZooKeeperClientBuilder createZKClientBuilder(String zkcName,
                                                                DistributedLogConfiguration conf,
                                                                String zkServers,
+                                                               RetryPolicy retryPolicy,
                                                                StatsLogger statsLogger) {
-        RetryPolicy retryPolicy = null;
-        if (conf.getZKNumRetries() > 0) {
-            retryPolicy = new BoundExponentialBackoffRetryPolicy(
-                conf.getZKRetryBackoffStartMillis(),
-                conf.getZKRetryBackoffMaxMillis(), conf.getZKNumRetries());
-        }
         ZooKeeperClientBuilder builder = ZooKeeperClientBuilder.newBuilder()
             .name(zkcName)
             .sessionTimeoutMs(conf.getZKSessionTimeoutMilliseconds())

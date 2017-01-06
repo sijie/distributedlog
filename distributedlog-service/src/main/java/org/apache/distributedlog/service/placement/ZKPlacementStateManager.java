@@ -28,6 +28,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.TreeSet;
 import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.bookkeeper.zookeeper.BoundExponentialBackoffRetryPolicy;
+import org.apache.bookkeeper.zookeeper.RetryPolicy;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.Transaction;
@@ -55,10 +57,16 @@ public class ZKPlacementStateManager implements PlacementStateManager {
 
     public ZKPlacementStateManager(URI uri, DistributedLogConfiguration conf, StatsLogger statsLogger) {
         String zkServers = BKNamespaceDriver.getZKServersFromDLUri(uri);
+        int zkSessionTimeout = 60000;
+        RetryPolicy retryPolicy = new BoundExponentialBackoffRetryPolicy(
+             zkSessionTimeout / 2,
+            2 * zkSessionTimeout,
+            Integer.MAX_VALUE);
         zkClient = BKNamespaceDriver.createZKClientBuilder(
             String.format("ZKPlacementStateManager-%s", zkServers),
             conf,
             zkServers,
+            retryPolicy,
             statsLogger.scope("placement_state_manager")).build();
         serverLoadPath = uri.getPath() + SERVER_LOAD_DIR;
     }
