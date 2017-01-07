@@ -30,25 +30,25 @@ public interface AsyncLogReader extends AsyncCloseable {
      *
      * @return stream name.
      */
-    public String getStreamName();
+    String getStreamName();
 
     /**
      * Read the next record from the log stream
      *
      * @return A promise that when satisfied will contain the Log Record with its DLSN.
      */
-    public Future<LogRecordWithDLSN> readNext();
+    Future<LogRecordWithDLSN> readNext();
 
     /**
      * Read next <i>numEntries</i> entries. The future is only satisfied with non-empty list
      * of entries. It doesn't block until returning exact <i>numEntries</i>. It is a best effort
      * call.
      *
-     * @param numEntries
+     * @param numRecords
      *          num entries
      * @return A promise that when satisfied will contain a non-empty list of records with their DLSN.
      */
-    public Future<List<LogRecordWithDLSN>> readBulk(int numEntries);
+    Future<List<LogRecordWithDLSN>> readBulk(int numRecords);
 
     /**
      * Read next <i>numEntries</i> entries in a given <i>waitTime</i>.
@@ -57,7 +57,7 @@ public interface AsyncLogReader extends AsyncCloseable {
      * The only exception is if there isn't any new entries written within <i>waitTime</i>, it would
      * wait until new entries are available.
      *
-     * @param numEntries
+     * @param numRecords
      *          max entries to return
      * @param waitTime
      *          maximum wait time if there are entries already for read
@@ -65,5 +65,5 @@ public interface AsyncLogReader extends AsyncCloseable {
      *          wait time unit
      * @return A promise that when satisfied will contain a non-empty list of records with their DLSN.
      */
-    public Future<List<LogRecordWithDLSN>> readBulk(int numEntries, long waitTime, TimeUnit timeUnit);
+    Future<List<LogRecordWithDLSN>> readBulk(int numRecords, long waitTime, TimeUnit timeUnit);
 }

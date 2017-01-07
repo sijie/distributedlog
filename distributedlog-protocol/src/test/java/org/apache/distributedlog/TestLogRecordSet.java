@@ -51,15 +51,12 @@ public class TestLogRecordSet {
         assertEquals("zero user bytes", HEADER_LEN, buffer.remaining());
         writer.release();
 
-        byte[] data = new byte[buffer.remaining()];
-        buffer.get(data);
-
+        LogRecord r = new LogRecord(1L, buffer.slice());
+        r.setRecordSet();
         LogRecordWithDLSN record = new LogRecordWithDLSN(
                 new DLSN(1L, 0L, 0L),
                 1L,
-                data,
-                1L);
-        record.setRecordSet();
+                r);
         Reader reader = LogRecordSet.of(record);
         assertNull("Empty record set should return null",
                 reader.nextRecord());
@@ -85,15 +82,12 @@ public class TestLogRecordSet {
 
         writer.release();
 
-        byte[] data = new byte[buffer.remaining()];
-        buffer.get(data);
-
+        LogRecord r = new LogRecord(1L, buffer.slice());
+        r.setRecordSet();
         LogRecordWithDLSN record = new LogRecordWithDLSN(
                 new DLSN(1L, 0L, 0L),
                 1L,
-                data,
-                1L);
-        record.setRecordSet();
+                r);
         Reader reader = LogRecordSet.of(record);
         assertNull("Empty record set should return null",
                 reader.nextRecord());
@@ -151,17 +145,13 @@ public class TestLogRecordSet {
             assertEquals(new DLSN(1L, 1L, 10L + i), writeResults.get(i));
         }
 
-        // Test reading from buffer
-        byte[] data = new byte[buffer.remaining()];
-        buffer.get(data);
-
+        LogRecord r = new LogRecord(99L, buffer.slice());
+        r.setPositionWithinLogSegment(888);
+        r.setRecordSet();
         LogRecordWithDLSN record = new LogRecordWithDLSN(
                 new DLSN(1L, 1L, 10L),
-                99L,
-                data,
-                999L);
-        record.setPositionWithinLogSegment(888);
-        record.setRecordSet();
+                999L,
+                r);
         Reader reader = LogRecordSet.of(record);
         LogRecordWithDLSN readRecord = reader.nextRecord();
         int numReads = 0;

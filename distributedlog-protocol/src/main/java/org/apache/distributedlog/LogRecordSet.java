@@ -100,6 +100,11 @@ public class LogRecordSet {
     }
 
     public static Reader of(LogRecordWithDLSN record) throws IOException {
+        return of(record, true);
+    }
+
+    public static Reader of(LogRecordWithDLSN record, boolean allocateBuffer)
+            throws IOException {
         checkArgument(record.isRecordSet(),
                 "record is not a recordset");
         ByteBuffer buffer = record.getPayloadBuffer();
@@ -114,7 +119,9 @@ public class LogRecordSet {
                 dlsn.getSlotId(),
                 startPosition,
                 startSequenceId,
-                Unpooled.wrappedBuffer(buffer));
+                record.getMetadata(),
+                Unpooled.wrappedBuffer(buffer),
+                allocateBuffer);
     }
 
     /**

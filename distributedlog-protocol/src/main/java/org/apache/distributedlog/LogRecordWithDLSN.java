@@ -18,9 +18,12 @@
 package org.apache.distributedlog;
 
 import com.google.common.annotations.VisibleForTesting;
+import java.nio.ByteBuffer;
 
 /**
  * Log record with {@link DLSN} and <code>SequenceId</code>.
+ *
+ * <p>It is the <code>immutable</code> representation of a {@link LogRecord} at read runtime.
  *
  * <h3>Sequence Numbers</h3>
  *
@@ -53,23 +56,32 @@ import com.google.common.annotations.VisibleForTesting;
  * wrote them.
  */
 public class LogRecordWithDLSN extends LogRecord {
+
+    private static final UnsupportedOperationException UNSUPPORTED_OPERATION_EXCEPTION =
+            new UnsupportedOperationException("Can't modify an immutable record");
+
     private final DLSN dlsn;
     private final long startSequenceIdOfCurrentSegment;
 
-    /**
-     * This empty constructor can only be called from Reader#readOp.
-     */
-    LogRecordWithDLSN(DLSN dlsn, long startSequenceIdOfCurrentSegment) {
-        super();
+    LogRecordWithDLSN(DLSN dlsn,
+                      long startSequenceIdOfCurrentSegment,
+                      long txId,
+                      ByteBuffer buffer,
+                      long metadata) {
+        super(txId, buffer, metadata);
         this.dlsn = dlsn;
         this.startSequenceIdOfCurrentSegment = startSequenceIdOfCurrentSegment;
     }
 
     @VisibleForTesting
-    public LogRecordWithDLSN(DLSN dlsn, long txid, byte[] data, long startSequenceIdOfCurrentSegment) {
-        super(txid, data);
-        this.dlsn = dlsn;
-        this.startSequenceIdOfCurrentSegment = startSequenceIdOfCurrentSegment;
+    public LogRecordWithDLSN(DLSN dlsn,
+                             long startSequenceIdOfCurrentSegment,
+                             LogRecord record) {
+        this(dlsn,
+                startSequenceIdOfCurrentSegment,
+                record.getTransactionId(),
+                record.getPayloadBuffer(),
+                record.getMetadata());
     }
 
     long getStartSequenceIdOfCurrentSegment() {
@@ -92,6 +104,40 @@ public class LogRecordWithDLSN extends LogRecord {
      */
     public DLSN getDlsn() {
         return dlsn;
+    }
+
+    //
+    // All mutate methods are not allowed to immutable record.
+    //
+
+    @Override
+    protected void setTransactionId(long txid) {
+        throw UNSUPPORTED_OPERATION_EXCEPTION;
+    }
+
+    @Override
+    protected void setMetadata(long metadata) {
+        throw UNSUPPORTED_OPERATION_EXCEPTION;
+    }
+
+    @Override
+    void setPositionWithinLogSegment(int positionWithinLogSegment) {
+        throw UNSUPPORTED_OPERATION_EXCEPTION;
+    }
+
+    @Override
+    public void setRecordSet() {
+        throw UNSUPPORTED_OPERATION_EXCEPTION;
+    }
+
+    @Override
+    public void setControl() {
+        throw UNSUPPORTED_OPERATION_EXCEPTION;
+    }
+
+    @Override
+    void setEndOfStream() {
+        throw UNSUPPORTED_OPERATION_EXCEPTION;
     }
 
     @Override

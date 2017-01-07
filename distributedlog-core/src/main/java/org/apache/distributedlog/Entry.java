@@ -239,19 +239,16 @@ public class Entry {
         /**
          * Read next log record from this record set.
          *
+         * <p>The flag {@code allocateBuffer} controls whether to allocate new buffer for the returned log record.
+         * If the log record is returned to user directly, the caller should set {@code allocateBuffer}
+         * to true. If the log record is used internally, the caller can set the {@code allocateBuffer}
+         * to false.
+         *
+         * @param allocateBuffer whether to allocate new buffer for the returned log record.
          * @return next log record from this record set.
          */
-        LogRecordWithDLSN nextRecord() throws IOException;
-
-        /**
-         * Skip the reader to the record whose transaction id is <code>txId</code>.
-         *
-         * @param txId
-         *          transaction id to skip to.
-         * @return true if skip succeeds, otherwise false.
-         * @throws IOException
-         */
-        boolean skipTo(long txId) throws IOException;
+        LogRecordWithDLSN nextRecord(boolean allocateBuffer)
+                throws IOException;
 
         /**
          * Skip the reader to the record whose DLSN is <code>dlsn</code>.

@@ -25,6 +25,8 @@ import static org.apache.distributedlog.LogRecordSet.VERSION;
 
 import io.netty.buffer.ByteBuf;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+
 import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.io.CompressionUtils;
 import org.apache.distributedlog.util.ReferenceCounted;
@@ -38,8 +40,10 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
     private final long entryId;
     private final long transactionId;
     private final long startSequenceId;
+    private final long parentMetadata;
     private int numRecords;
     private final ByteBuf reader;
+    private final boolean allocateBuffer;
 
     // slot id
     private long slotId;
@@ -51,7 +55,9 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
                              long startSlotId,
                              int startPositionWithinLogSegment,
                              long startSequenceId,
-                             ByteBuf in)
+                             long parentMetadata,
+                             ByteBuf in,
+                             boolean allocateBuffer)
             throws IOException {
         this.logSegmentSeqNo = logSegmentSeqNo;
         this.entryId = entryId;
@@ -59,6 +65,8 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
         this.slotId = startSlotId;
         this.position = startPositionWithinLogSegment;
         this.startSequenceId = startSequenceId;
+        this.parentMetadata = parentMetadata;
+        this.allocateBuffer = allocateBuffer;
 
         // read data
         try {
@@ -100,11 +108,15 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
 
         DLSN dlsn = new DLSN(logSegmentSeqNo, entryId, slotId);
 
-        LogRecordWithDLSN record =
-                new LogRecordWithDLSN(dlsn, startSequenceId);
-        record.setPositionWithinLogSegment(position);
-        record.setTransactionId(transactionId);
-        record.readPayload(reader);
+        ByteBuffer payload = LogRecord.Reader.readPayload(reader, allocateBuffer);
+
+        long metadata = LogRecord.setPositionWithinLogSegment(parentMetadata, position);
+        LogRecordWithDLSN record = new LogRecordWithDLSN(
+                dlsn,
+                startSequenceId,
+                transactionId,
+                payload,
+                metadata);
 
         ++slotId;
         ++position;

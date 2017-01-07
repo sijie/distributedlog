@@ -206,11 +206,12 @@ public class DLMTestUtil {
     }
 
     public static LogRecordWithDLSN getLogRecordWithDLSNInstance(DLSN dlsn, long txId, boolean isControlRecord) {
-        LogRecordWithDLSN record = new LogRecordWithDLSN(dlsn, txId, generatePayload(txId), 1L);
-        record.setPositionWithinLogSegment((int)txId + 1);
+        LogRecord r = new LogRecord(txId, generatePayload(txId));
+        r.setPositionWithinLogSegment((int) txId + 1);
         if (isControlRecord) {
-            record.setControl();
+            r.setControl();
         }
+        LogRecordWithDLSN record = new LogRecordWithDLSN(dlsn, 1L, r);
         return record;
     }
 

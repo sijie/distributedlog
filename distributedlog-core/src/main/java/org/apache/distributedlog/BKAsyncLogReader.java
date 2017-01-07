@@ -528,7 +528,7 @@ class BKAsyncLogReader implements AsyncLogReader, Runnable, AsyncNotification {
         if (readAheadReader.getNumCachedEntries() > 0 || null != nextRecord) {
             return true;
         } else if (null != currentEntry) {
-            nextRecord = currentEntry.nextRecord();
+            nextRecord = currentEntry.nextRecord(true);
             return null != nextRecord;
         }
         return false;
@@ -548,7 +548,7 @@ class BKAsyncLogReader implements AsyncLogReader, Runnable, AsyncNotification {
 
         LogRecordWithDLSN recordToReturn;
         if (null == nextRecord) {
-            nextRecord = currentEntry.nextRecord();
+            nextRecord = currentEntry.nextRecord(true);
             // no more records in current entry
             if (null == nextRecord) {
                 currentEntry.release();
@@ -559,7 +559,7 @@ class BKAsyncLogReader implements AsyncLogReader, Runnable, AsyncNotification {
 
         // found a record to return and prefetch the next one
         recordToReturn = nextRecord;
-        nextRecord = currentEntry.nextRecord();
+        nextRecord = currentEntry.nextRecord(true);
         return recordToReturn;
     }
 

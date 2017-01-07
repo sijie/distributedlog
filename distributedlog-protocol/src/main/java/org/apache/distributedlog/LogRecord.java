@@ -129,17 +129,7 @@ public class LogRecord {
 
     private long metadata;
     private long txid;
-    private ByteBuffer payload;
-
-    /**
-     * Construct an uninitialized log record.
-     *
-     * <p>NOTE: only deserializer should call this constructor.
-     */
-    protected LogRecord() {
-        this.txid = 0;
-        this.metadata = 0;
-    }
+    private final ByteBuffer payload;
 
     /**
      * Construct a log record with <i>TransactionId</i> and payload.
@@ -152,9 +142,17 @@ public class LogRecord {
      *          record data
      */
     public LogRecord(long txid, byte[] payload) {
+        this(txid, ByteBuffer.wrap(payload));
+    }
+
+    public LogRecord(long txid, ByteBuffer buffer) {
+        this(txid, buffer, 0);
+    }
+
+    protected LogRecord(long txid, ByteBuffer buffer, long metadata) {
         this.txid = txid;
-        this.payload = ByteBuffer.wrap(payload);
-        this.metadata = 0;
+        this.payload = buffer;
+        this.metadata = metadata;
     }
 
     //
@@ -187,6 +185,12 @@ public class LogRecord {
      * @return payload of this log record.
      */
     public byte[] getPayload() {
+        if (payload.hasArray() && payload.arrayOffset() == 0) {
+            byte[] data = payload.array();
+            if (data.length == payload.limit()) {
+                return data;
+            }
+        }
         byte[] payloadArr = new byte[payload.remaining()];
         payload.duplicate().get(payloadArr);
         return payloadArr;
@@ -194,24 +198,6 @@ public class LogRecord {
 
     public ByteBuffer getPayloadBuffer() {
         return payload.slice();
-    }
-
-    /**
-     * Set payload for this log record.
-     *
-     * @param payload payload of this log record
-     */
-    void setPayload(byte[] payload) {
-        this.payload = ByteBuffer.wrap(payload);
-    }
-
-    /**
-     * Set payload buffer for this log record.
-     *
-     * @param buffer payload buffer of this log record.
-     */
-    void setPayloadBuffer(ByteBuffer buffer) {
-        this.payload = buffer;
     }
 
     /**
@@ -242,8 +228,13 @@ public class LogRecord {
      * @param positionWithinLogSegment position in the log segment.
      */
     void setPositionWithinLogSegment(int positionWithinLogSegment) {
+        metadata = setPositionWithinLogSegment(metadata, positionWithinLogSegment);
+    }
+
+    static long setPositionWithinLogSegment(long metadata,
+                                            int positionWithinLogSegment) {
         assert(positionWithinLogSegment >= 0);
-        metadata = (metadata & LOGRECORD_METADATA_POSITION_UMASK)
+        return (metadata & LOGRECORD_METADATA_POSITION_UMASK)
             | (((long) positionWithinLogSegment) << LOGRECORD_METADATA_POSITION_SHIFT);
     }
 
@@ -358,17 +349,6 @@ public class LogRecord {
     // Serialization & Deserialization
     //
 
-    // The caller should pass in a heap buffer
-    protected void readPayload(ByteBuf in) throws IOException {
-        int length = in.readInt();
-        if (length < 0) {
-            throw new EOFException("Log Record is corrupt: Negative length " + length);
-        }
-        payload = ByteBuffer.allocateDirect(length);
-        in.readBytes(payload);
-        payload.flip();
-    }
-
     private void writePayload(ByteBuf out) throws IOException {
         ByteBuffer bufferToWrite = payload.slice();
         out.writeInt(bufferToWrite.remaining());
@@ -439,6 +419,33 @@ public class LogRecord {
             this.deserializeRecordSet = deserializeRecordSet;
         }
 
+        // The caller should pass in a heap buffer
+        protected static ByteBuffer readPayload(ByteBuf in,
+                                                boolean allocateBuffer)
+                throws IOException {
+            int length = in.readInt();
+            if (length < 0) {
+                throw new EOFException("Log Record is corrupt: Negative length " + length);
+            }
+            if (length > in.readableBytes()) {
+                throw new IOException("Log record is corrupt : No enough data - length = "
+                        + length + " but only " + in.readableBytes() + " is available");
+            }
+            if (!allocateBuffer) {
+                try {
+                    ByteBuffer buffer = in.nioBuffer(in.readerIndex(), length);
+                    in.setIndex(in.readerIndex() + length, in.writerIndex());
+                    return buffer;
+                } catch (UnsupportedOperationException noe) {
+                    LOG.debug("Can't create nio buffer. Then allocate a new nio buffer.", noe);
+                }
+            }
+            ByteBuffer payload = ByteBuffer.allocate(length);
+            in.readBytes(payload);
+            payload.flip();
+            return payload;
+        }
+
         /**
          * Read an log record from the input stream.
          *
@@ -449,6 +456,10 @@ public class LogRecord {
          * @throws IOException on error.
          */
         public LogRecordWithDLSN readOp() throws IOException {
+            return readOp(true);
+        }
+
+        LogRecordWithDLSN readOp(boolean allocateBuffer) throws IOException {
             LogRecordWithDLSN nextRecordInStream;
             while (true) {
                 if (lastRecordSkipTo != null) {
@@ -478,10 +489,14 @@ public class LogRecord {
                     // retrieve the currentDLSN and advance to the next
                     // Given that there are 20 bytes following the read position of the previous call
                     // to readLong, we should not have moved ahead in the stream.
-                    nextRecordInStream = new LogRecordWithDLSN(recordStream.getCurrentPosition(), startSequenceId);
-                    nextRecordInStream.setMetadata(metadata);
-                    nextRecordInStream.setTransactionId(in.readLong());
-                    nextRecordInStream.readPayload(in);
+                    long txId = in.readLong();
+                    ByteBuffer payload = readPayload(in, allocateBuffer);
+                    nextRecordInStream = new LogRecordWithDLSN(
+                            recordStream.getCurrentPosition(),
+                            startSequenceId,
+                            txId,
+                            payload,
+                            metadata);
                     if (LOG.isTraceEnabled()) {
                         if (nextRecordInStream.isControl()) {
                             LOG.trace("Reading {} Control DLSN {}",
@@ -498,7 +513,7 @@ public class LogRecord {
                     }
 
                     if (deserializeRecordSet && nextRecordInStream.isRecordSet()) {
-                        recordSetReader = LogRecordSet.of(nextRecordInStream);
+                        recordSetReader = LogRecordSet.of(nextRecordInStream, allocateBuffer);
                     } else {
                         recordStream.advance(numRecords);
                         return nextRecordInStream;
@@ -578,12 +593,14 @@ public class LogRecord {
                     // get the num of records to skip
                     if (isRecordSet(flags)) {
                         // read record set
-                        LogRecordWithDLSN record =
-                            new LogRecordWithDLSN(recordStream.getCurrentPosition(), startSequenceId);
-                        record.setMetadata(flags);
-                        record.setTransactionId(currTxId);
-                        record.readPayload(in);
-                        recordSetReader = LogRecordSet.of(record);
+                        ByteBuffer payload = readPayload(in, true);
+                        LogRecordWithDLSN record = new LogRecordWithDLSN(
+                                recordStream.getCurrentPosition(),
+                                startSequenceId,
+                                currTxId,
+                                payload,
+                                flags);
+                        recordSetReader = LogRecordSet.of(record, true);
                     } else {
                         int length = in.readInt();
                         if (length < 0) {
