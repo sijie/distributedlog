@@ -551,6 +551,7 @@ class BKAsyncLogReader implements AsyncLogReader, Runnable, AsyncNotification {
             nextRecord = currentEntry.nextRecord();
             // no more records in current entry
             if (null == nextRecord) {
+                currentEntry.release();
                 currentEntry = null;
                 return readNextRecord();
             }

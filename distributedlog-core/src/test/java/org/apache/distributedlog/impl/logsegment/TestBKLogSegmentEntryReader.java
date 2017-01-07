@@ -185,6 +185,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 assertEquals(entryId, dlsn.getEntryId());
                 record = entryReader.nextRecord();
             }
+            entryReader.release();
             ++entryId;
         }
         assertEquals(21, txId);
@@ -266,6 +267,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
             assertEquals(entryId, dlsn.getEntryId());
             record = entryReader.nextRecord();
         }
+        entryReader.release();
         ++entryId;
         assertEquals(2L, txId);
         // wait for the read ahead entries to become 10 again
@@ -322,6 +324,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
             assertEquals(entryId, dlsn.getEntryId());
             record = entryReader.nextRecord();
         }
+        entryReader.release();
         ++entryId;
         assertEquals(2L, txId);
         // wait for the read ahead entries to become 10 again
@@ -378,6 +381,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
             assertEquals(entryId, dlsn.getEntryId());
             record = entryReader.nextRecord();
         }
+        entryReader.release();
         ++entryId;
         assertEquals(2L, txId);
         assertEquals(reader.getLastAddConfirmed(), reader.readAheadEntries.size());
@@ -428,6 +432,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 assertEquals(entryId, dlsn.getEntryId());
                 record = entryReader.nextRecord();
             }
+            entryReader.release();
             ++entryId;
             if (entryId == expectedLastAddConfirmed + 1) {
                 break;
@@ -447,6 +452,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertNotNull(record);
         assertTrue(record.isControl());
         assertNull(entryReader.nextRecord());
+        entryReader.release();
         // once the read is advanced, we will prefetch next record
         while (reader.getNextEntryId() <= entryId) {
             TimeUnit.MILLISECONDS.sleep(10);
@@ -499,6 +505,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 assertEquals(entryId, dlsn.getEntryId());
                 record = entryReader.nextRecord();
             }
+            entryReader.release();
             ++entryId;
             if (entryId == expectedLastAddConfirmed + 1) {
                 break;
@@ -517,6 +524,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertNotNull(record);
         assertTrue(record.isControl());
         assertNull(entryReader.nextRecord());
+        entryReader.release();
         // once the read is advanced, we will prefetch next record
         while (reader.getNextEntryId() <= entryId) {
             TimeUnit.MILLISECONDS.sleep(10);
@@ -533,6 +541,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertNotNull(record);
         assertFalse(record.isControl());
         assertNull(entryReader.nextRecord());
+        entryReader.release();
         while (reader.getNextEntryId() <= entryId + 1) {
             TimeUnit.MILLISECONDS.sleep(10);
         }

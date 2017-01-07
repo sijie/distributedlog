@@ -17,6 +17,7 @@
  */
 package org.apache.distributedlog;
 
+import static org.apache.distributedlog.LogRecord.MAX_LOGRECORDSET_SIZE;
 import static org.apache.distributedlog.LogRecord.MAX_LOGRECORD_SIZE;
 import static org.apache.distributedlog.buffer.BufferPool.ALLOCATOR;
 
@@ -59,8 +60,7 @@ class EnvelopedEntryWriter implements Writer, ReferenceCounted {
 
     private final String logName;
     private ByteBuf buffer;
-    private final LogRecord.Writer writer;
-    private final ByteBufOutputStream out;
+    private LogRecord.Writer writer;
     private final List<WriteRequest> writeRequests;
     private final CompressionCodec.Type codec;
     private final StatsLogger statsLogger;
@@ -73,18 +73,45 @@ class EnvelopedEntryWriter implements Writer, ReferenceCounted {
                          CompressionCodec.Type codec,
                          StatsLogger statsLogger) {
         this.logName = logName;
-        this.buffer = ALLOCATOR.buffer(initialBufferSize, initialBufferSize * 6 / 5);
-        this.out = new ByteBufOutputStream(buffer);
-        this.writer = new LogRecord.Writer(out);
         this.writeRequests = new LinkedList<WriteRequest>();
         this.codec = codec;
         this.statsLogger = statsLogger;
+        newBufferAndWriter(initialBufferSize);
+    }
+
+    private void newBufferAndWriter(int initialBufferSize) {
+        /**
+         * TODO: use direct buffer when bookkeeper's api support ByteBuf or ByteBuffer.
+         */
+        this.buffer = ALLOCATOR.heapBuffer(
+                Math.max(initialBufferSize + EnvelopedEntry.PAYLOAD_OFFSET, EnvelopedEntry.PAYLOAD_OFFSET),
+                MAX_LOGRECORDSET_SIZE + EnvelopedEntry.PAYLOAD_OFFSET);
         // write the version
-        this.buffer.writeByte(EnvelopedEntry.CURRENT_VERSION);
+        buffer.writeByte(EnvelopedEntry.CURRENT_VERSION);
         // flags
-        this.buffer.writeInt(EnvelopedEntry.Header.getFlag(codec));
+        buffer.writeInt(EnvelopedEntry.Header.getFlag(codec));
         // original length
-        this.buffer.writeInt(0);
+        buffer.writeInt(0);
+        this.writer = new LogRecord.Writer(buffer);
+    }
+
+    @Override
+    public boolean canWriteRecord(int logRecordSize) {
+        if (logRecordSize <= buffer.writableBytes()) {
+            return true;
+        } else if (count > 0) {
+            // there is already more than one record and if the current buffer doesn't fit the record
+            // return false. so the writer can transmit this entry.
+            return false;
+        } else {
+            // no record in the buffer, try to enlarge the buffer
+            this.buffer.ensureWritable(logRecordSize, true);
+            if (logRecordSize > buffer.writableBytes()) {
+                this.buffer.release();
+                newBufferAndWriter(logRecordSize);
+            }
+            return true;
+        }
     }
 
     @Override
@@ -206,10 +233,12 @@ class EnvelopedEntryWriter implements Writer, ReferenceCounted {
     @Override
     public void completeTransmit(long lssn, long entryId) {
         satisfyPromises(lssn, entryId);
+        release();
     }
 
     @Override
     public void abortTransmit(Throwable reason) {
         cancelPromises(reason);
+        release();
     }
 }

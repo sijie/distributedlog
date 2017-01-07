@@ -65,8 +65,8 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
             int metadata = in.readInt();
             int version = metadata & METADATA_VERSION_MASK;
             if (version != VERSION) {
-                throw new IOException(String.format("Version mismatch while reading. Received: %d," +
-                        " Required: %d", version, VERSION));
+                throw new IOException(String.format("Version mismatch while reading. Received: %d,"
+                        + " Required: %d", version, VERSION));
             }
             int codecCode = metadata & METADATA_COMPRESSION_MASK;
             this.numRecords = in.readInt();

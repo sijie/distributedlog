@@ -21,6 +21,7 @@ import com.twitter.util.Await;
 import com.twitter.util.Duration;
 import com.twitter.util.FutureEventListener;
 import com.twitter.util.Promise;
+import io.netty.buffer.ByteBuf;
 
 import java.util.concurrent.TimeUnit;
 
@@ -29,11 +30,13 @@ class BKTransmitPacket {
     private final EntryBuffer recordSet;
     private final long transmitTime;
     private final Promise<Integer> transmitComplete;
+    private final ByteBuf transmitBuffer;
 
-    BKTransmitPacket(EntryBuffer recordSet) {
+    BKTransmitPacket(EntryBuffer recordSet, ByteBuf transmitBuffer) {
         this.recordSet = recordSet;
         this.transmitTime = System.nanoTime();
         this.transmitComplete = new Promise<Integer>();
+        this.transmitBuffer = transmitBuffer;
     }
 
     EntryBuffer getRecordSet() {
@@ -54,6 +57,9 @@ class BKTransmitPacket {
      */
     public void notifyTransmitComplete(int transmitResult) {
         transmitComplete.setValue(transmitResult);
+        if (null != transmitBuffer) {
+            transmitBuffer.release();
+        }
     }
 
     /**

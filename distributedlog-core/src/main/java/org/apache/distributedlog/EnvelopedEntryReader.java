@@ -17,11 +17,15 @@
  */
 package org.apache.distributedlog;
 
+import org.apache.distributedlog.io.CompressionCodec;
+import org.apache.distributedlog.io.CompressionUtils;
+import org.apache.distributedlog.util.BitMaskUtils;
+import io.netty.buffer.ByteBuf;
 import org.apache.bookkeeper.stats.StatsLogger;
 
-import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.InputStream;
+
+import static org.apache.distributedlog.EnvelopedEntry.*;
 
 /**
  * Record reader to read records from an enveloped entry buffer.
@@ -30,6 +34,7 @@ class EnvelopedEntryReader implements Entry.Reader, RecordStream {
 
     private final long logSegmentSeqNo;
     private final long entryId;
+    private final ByteBuf inBuf;
     private final LogRecord.Reader reader;
 
     // slot id
@@ -38,20 +43,43 @@ class EnvelopedEntryReader implements Entry.Reader, RecordStream {
     EnvelopedEntryReader(long logSegmentSeqNo,
                          long entryId,
                          long startSequenceId,
-                         InputStream in,
-                         boolean envelopedEntry,
+                         ByteBuf in,
                          boolean deserializeRecordSet,
                          StatsLogger statsLogger)
             throws IOException {
         this.logSegmentSeqNo = logSegmentSeqNo;
         this.entryId = entryId;
-        InputStream src = in;
-        if (envelopedEntry) {
-            src = EnvelopedEntry.fromInputStream(in, statsLogger);
+
+        // read the data
+        try {
+            byte version = in.readByte();
+            if (version != CURRENT_VERSION) {
+                throw new IOException(String.format("Version mismatch while reading. Received: %d"
+                    + " Required: %d", version, CURRENT_VERSION));
+            }
+            int flags = in.readInt();
+            int decompressedSize = in.readInt();
+            int compressionType = (int) BitMaskUtils.get(flags, Header.COMPRESSION_CODEC_MASK);
+            if (compressionType == Header.COMPRESSION_CODEC_NONE) {
+                if (in.readableBytes() != decompressedSize) {
+                    throw new IOException("Inconsistent data length found for a non-compressed record set : original = "
+                            + decompressedSize + ", actual = " + in.readableBytes());
+                }
+                in.retain();
+                inBuf = in;
+            } else if (compressionType == Header.COMPRESSION_CODEC_LZ4) {
+                CompressionCodec codec = CompressionUtils.getCompressionCodec(CompressionCodec.Type.LZ4);
+                inBuf = codec.decompress(in, decompressedSize, statsLogger.getOpStatsLogger("decompression_time"));
+            } else {
+                throw new IOException(String.format("Unsupported Compression Type: %s",
+                                                    compressionType));
+            }
+        } finally {
+            in.release();
         }
         this.reader = new LogRecord.Reader(
                 this,
-                new DataInputStream(src),
+                inBuf,
                 startSequenceId,
                 deserializeRecordSet);
     }
@@ -98,5 +126,15 @@ class EnvelopedEntryReader implements Entry.Reader, RecordStream {
     @Override
     public String getName() {
         return "EnvelopedReader";
+    }
+
+    @Override
+    public void retain() {
+        inBuf.retain();
+    }
+
+    @Override
+    public void release() {
+        inBuf.release();
     }
 }

@@ -17,24 +17,29 @@
  */
 package org.apache.distributedlog;
 
-import com.google.common.base.Optional;
-import com.google.common.base.Preconditions;
 import org.apache.distributedlog.exceptions.LogRecordTooLongException;
 import org.apache.distributedlog.exceptions.WriteException;
 import org.apache.distributedlog.io.CompressionCodec;
+import org.apache.distributedlog.util.ReferenceCounted;
 import com.twitter.util.Promise;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+
+import static org.apache.distributedlog.buffer.BufferPool.ALLOCATOR;
 
 /**
  * A set of {@link LogRecord}s.
  */
 public class Entry {
+
+    private static final Logger logger = LoggerFactory.getLogger(Entry.class);
 
     /**
      * Create a new log record set.
@@ -43,8 +48,6 @@ public class Entry {
      *          name of the log
      * @param initialBufferSize
      *          initial buffer size
-     * @param envelopeBeforeTransmit
-     *          if envelope the buffer before transmit
      * @param codec
      *          compression codec
      * @param statsLogger
@@ -75,15 +78,7 @@ public class Entry {
         private long logSegmentSequenceNumber = -1;
         private long entryId = -1;
         private long startSequenceId = Long.MIN_VALUE;
-        private boolean envelopeEntry = true;
-        // input stream
-        private InputStream in = null;
-        // or bytes array
-        private byte[] data = null;
-        private int offset = -1;
-        private int length = -1;
-        private Optional<Long> txidToSkipTo = Optional.absent();
-        private Optional<DLSN> dlsnToSkipTo = Optional.absent();
+        private ByteBuf inBuf = null;
         private boolean deserializeRecordSet = true;
 
         private Builder() {}
@@ -97,15 +92,7 @@ public class Entry {
             logSegmentSequenceNumber = -1;
             entryId = -1;
             startSequenceId = Long.MIN_VALUE;
-            envelopeEntry = true;
-            // input stream
-            in = null;
-            // or bytes array
-            data = null;
-            offset = -1;
-            length = -1;
-            txidToSkipTo = Optional.absent();
-            dlsnToSkipTo = Optional.absent();
+            inBuf = null;
             return this;
         }
 
@@ -138,18 +125,6 @@ public class Entry {
         }
 
         /**
-         * Set whether this record set is enveloped or not.
-         *
-         * @param enabled
-         *          flag indicates whether this record set is enveloped or not.
-         * @return builder
-         */
-        public Builder setEnvelopeEntry(boolean enabled) {
-            this.envelopeEntry = enabled;
-            return this;
-        }
-
-        /**
          * Set the serialized bytes data of this record set.
          *
          * @param data
@@ -161,9 +136,7 @@ public class Entry {
          * @return builder
          */
         public Builder setData(byte[] data, int offset, int length) {
-            this.data = data;
-            this.offset = offset;
-            this.length = length;
+            this.inBuf = Unpooled.wrappedBuffer(data, offset, length);
             return this;
         }
 
@@ -175,31 +148,19 @@ public class Entry {
          * @return builder
          */
         public Builder setInputStream(InputStream in) {
-            this.in = in;
+            try {
+                int size = in.available();
+                this.inBuf = ALLOCATOR.buffer(size);
+                this.inBuf.writeBytes(in, size);
+            } catch (IOException e) {
+                logger.error("Unexpected IOException while reading from input stream", e);
+                this.inBuf = ALLOCATOR.buffer(0);
+            }
             return this;
         }
 
-        /**
-         * Set the record set starts from <code>dlsn</code>.
-         *
-         * @param dlsn
-         *          dlsn to skip to
-         * @return builder
-         */
-        public Builder skipTo(@Nullable DLSN dlsn) {
-            this.dlsnToSkipTo = Optional.fromNullable(dlsn);
-            return this;
-        }
-
-        /**
-         * Set the record set starts from <code>txid</code>.
-         *
-         * @param txid
-         *          txid to skip to
-         * @return builder
-         */
-        public Builder skipTo(long txid) {
-            this.txidToSkipTo = Optional.of(txid);
+        public Builder setData(ByteBuf buf) {
+            this.inBuf = buf;
             return this;
         }
 
@@ -215,118 +176,30 @@ public class Entry {
             return this;
         }
 
-        public Entry build() {
-            Preconditions.checkNotNull(data, "Serialized data isn't provided");
-            Preconditions.checkArgument(offset >= 0 && length >= 0
-                    && (offset + length) <= data.length,
-                    "Invalid offset or length of serialized data");
-            return new Entry(
-                    logSegmentSequenceNumber,
-                    entryId,
-                    startSequenceId,
-                    envelopeEntry,
-                    deserializeRecordSet,
-                    data,
-                    offset,
-                    length,
-                    txidToSkipTo,
-                    dlsnToSkipTo);
-        }
-
         public Entry.Reader buildReader() throws IOException {
-            Preconditions.checkArgument(data != null || in != null,
-                    "Serialized data or input stream isn't provided");
-            InputStream in;
-            if (null != this.in) {
-                in = this.in;
-            } else {
-                Preconditions.checkArgument(offset >= 0 && length >= 0
-                                && (offset + length) <= data.length,
-                        "Invalid offset or length of serialized data");
-                in = new ByteArrayInputStream(data, offset, length);
-            }
             return new EnvelopedEntryReader(
                     logSegmentSequenceNumber,
                     entryId,
                     startSequenceId,
-                    in,
-                    envelopeEntry,
+                    inBuf,
                     deserializeRecordSet,
                     NullStatsLogger.INSTANCE);
         }
 
     }
 
-    private final long logSegmentSequenceNumber;
-    private final long entryId;
-    private final long startSequenceId;
-    private final boolean envelopedEntry;
-    private final boolean deserializeRecordSet;
-    private final byte[] data;
-    private final int offset;
-    private final int length;
-    private final Optional<Long> txidToSkipTo;
-    private final Optional<DLSN> dlsnToSkipTo;
-
-    private Entry(long logSegmentSequenceNumber,
-                  long entryId,
-                  long startSequenceId,
-                  boolean deserializeRecordSet,
-                  byte[] data,
-                  int offset,
-                  int length,
-                  Optional<Long> txidToSkipTo,
-                  Optional<DLSN> dlsnToSkipTo) {
-        this.logSegmentSequenceNumber = logSegmentSequenceNumber;
-        this.entryId = entryId;
-        this.startSequenceId = startSequenceId;
-        this.envelopedEntry = envelopedEntry;
-        this.deserializeRecordSet = deserializeRecordSet;
-        this.data = data;
-        this.offset = offset;
-        this.length = length;
-        this.txidToSkipTo = txidToSkipTo;
-        this.dlsnToSkipTo = dlsnToSkipTo;
-    }
-
-    /**
-     * Get raw data of this record set.
-     *
-     * @return raw data representation of this record set.
-     */
-    public byte[] getRawData() {
-        return data;
-    }
-
-    /**
-     * Create reader to iterate over this record set.
-     *
-     * @return reader to iterate over this record set.
-     * @throws IOException if the record set is invalid record set.
-     */
-    public Reader reader() throws IOException {
-        InputStream in = new ByteArrayInputStream(data, offset, length);
-        Reader reader = new EnvelopedEntryReader(
-                logSegmentSequenceNumber,
-                entryId,
-                startSequenceId,
-                in,
-                envelopedEntry,
-                deserializeRecordSet,
-                NullStatsLogger.INSTANCE);
-        if (txidToSkipTo.isPresent()) {
-            reader.skipTo(txidToSkipTo.get());
-        }
-        if (dlsnToSkipTo.isPresent()) {
-            reader.skipTo(dlsnToSkipTo.get());
-        }
-        return reader;
-    }
-
     /**
      * Writer to append {@link LogRecord}s to {@link Entry}.
      */
     public interface Writer extends EntryBuffer {
+
+        /**
+         * Whether the writer can write the record.
+         *
+         * @param logRecordSize the size of the log record.
+         * @return true if the writer can accept the record; otherwise false.
+         */
+        boolean canWriteRecord(int logRecordSize);
 
         /**
          * Write a {@link LogRecord} to this record set.
@@ -347,7 +220,7 @@ public class Entry {
     /**
      * Reader to read {@link LogRecord}s from this record set.
      */
-    public interface Reader {
+    public interface Reader extends ReferenceCounted {
 
         /**
          * Get the log segment sequence number.

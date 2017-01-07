@@ -265,14 +265,20 @@ public class ReadUtils {
                         LOG.debug("{} finished reading entries [{} - {}] from {}",
                                 new Object[]{ streamName, startEntryId, endEntryId, metadata});
                     }
-                    for (Entry.Reader entry : entries) {
-                        try {
-                            visitEntryRecords(entry, context, selector);
-                        } catch (IOException ioe) {
-                            // exception is only thrown due to bad ledger entry, so it might be corrupted
-                            // we shouldn't do anything beyond this point. throw the exception to application
-                            promise.setException(ioe);
-                            return;
+                    try {
+                        for (Entry.Reader entry : entries) {
+                            try {
+                                visitEntryRecords(entry, context, selector);
+                            } catch (IOException ioe) {
+                                // exception is only thrown due to bad ledger entry, so it might be corrupted
+                                // we shouldn't do anything beyond this point. throw the exception to application
+                                promise.setException(ioe);
+                                return;
+                            }
+                        }
+                    } finally {
+                        for (Entry.Reader entry : entries) {
+                            entry.release();
                         }
                     }
 

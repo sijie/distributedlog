@@ -26,6 +26,7 @@ import com.twitter.util.Await;
 import com.twitter.util.Future;
 import com.twitter.util.FutureEventListener;
 import com.twitter.util.Promise;
+import io.netty.buffer.ByteBuf;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Assert;
 import org.junit.Test;
@@ -47,21 +48,21 @@ public class TestEntry {
         Writer writer = Entry.newEntry(
                 "test-empty-record-set",
                 1024,
-                true,
                 CompressionCodec.Type.NONE,
                 NullStatsLogger.INSTANCE);
         assertEquals("zero bytes", 0, writer.getNumBytes());
         assertEquals("zero records", 0, writer.getNumRecords());
 
-        Buffer buffer = writer.getBuffer();
-        Entry recordSet = Entry.newBuilder()
-                .setData(buffer.getData(), 0, buffer.size())
+        ByteBuf buffer = writer.getBuffer();
+        Reader reader = Entry.newBuilder()
+                .setData(buffer.retain().slice())
                 .setLogSegmentInfo(1L, 0L)
                 .setEntryId(0L)
-                .build();
-        Reader reader = recordSet.reader();
+                .buildReader();
         Assert.assertNull("Empty record set should return null",
                 reader.nextRecord());
+        reader.release();
+        writer.release();
     }
 
     @Test(timeout = 20000)
@@ -69,7 +70,6 @@ public class TestEntry {
         Writer writer = Entry.newEntry(
                 "test-write-too-long-record",
                 1024,
-                false,
                 CompressionCodec.Type.NONE,
                 NullStatsLogger.INSTANCE);
         assertEquals("zero bytes", 0, writer.getNumBytes());
@@ -85,8 +85,10 @@ public class TestEntry {
         assertEquals("zero bytes", 0, writer.getNumBytes());
         assertEquals("zero records", 0, writer.getNumRecords());
 
-        Buffer buffer = writer.getBuffer();
-        Assert.assertEquals("zero bytes", 0, buffer.size());
+        ByteBuf buffer = writer.getBuffer();
+        Assert.assertEquals("zero data bytes",
+                0, buffer.readableBytes() - EnvelopedEntry.PAYLOAD_OFFSET);
+        writer.release();
     }
 
     @Test(timeout = 20000)
@@ -94,7 +96,6 @@ public class TestEntry {
         Writer writer = Entry.newEntry(
                 "test-write-records",
                 1024,
-                true,
                 CompressionCodec.Type.NONE,
                 NullStatsLogger.INSTANCE);
         assertEquals("zero bytes", 0, writer.getNumBytes());
@@ -131,7 +132,9 @@ public class TestEntry {
             assertEquals((i + 6) + " records", (i + 6), writer.getNumRecords());
         }
 
-        Buffer buffer = writer.getBuffer();
+        ByteBuf buffer = writer.getBuffer();
+        // retain the object otherwise, it will be released after transmit.
+        buffer.retain();
 
         // Test transmit complete
         writer.completeTransmit(1L, 1L);
@@ -141,12 +144,11 @@ public class TestEntry {
         }
 
         // Test reading from buffer
-        Entry recordSet = Entry.newBuilder()
-                .setData(buffer.getData(), 0, buffer.size())
+        Reader reader = Entry.newBuilder()
+                .setData(buffer.retain().slice())
                 .setLogSegmentInfo(1L, 1L)
                 .setEntryId(0L)
-                .build();
-        Reader reader = recordSet.reader();
+                .buildReader();
         LogRecordWithDLSN record = reader.nextRecord();
         int numReads = 0;
         long expectedTxid = 0L;
@@ -158,6 +160,8 @@ public class TestEntry {
             ++expectedTxid;
             record = reader.nextRecord();
         }
+        reader.release();
+        writer.release();
         Assert.assertEquals(10, numReads);
     }
 
@@ -166,7 +170,6 @@ public class TestEntry {
         Writer writer = Entry.newEntry(
                 "test-write-recordset",
                 1024,
-                true,
                 CompressionCodec.Type.NONE,
                 NullStatsLogger.INSTANCE);
         assertEquals("zero bytes", 0, writer.getNumBytes());
@@ -227,7 +230,8 @@ public class TestEntry {
             assertEquals((i + 11) + " records", (i + 11), writer.getNumRecords());
         }
 
-        Buffer buffer = writer.getBuffer();
+        writer.retain();
+        ByteBuf buffer = writer.getBuffer();
 
         // Test transmit complete
         writer.completeTransmit(1L, 1L);
@@ -263,9 +267,11 @@ public class TestEntry {
         verifyReadResult(buffer, 1L, 1L, 1L, false,
                 new DLSN(1L, 1L, 12L), 0, 0, 3,
                 new DLSN(1L, 1L, 12L), 12L);
+
+        writer.release();
     }
 
-    void verifyReadResult(Buffer data,
+    void verifyReadResult(ByteBuf data,
                           long lssn, long entryId, long startSequenceId,
                           boolean deserializeRecordSet,
                           DLSN skipTo,
@@ -274,14 +280,13 @@ public class TestEntry {
                           int lastNumRecords,
                           DLSN expectedDLSN,
                           long expectedTxId) throws Exception {
-        Entry recordSet = Entry.newBuilder()
-                .setData(data.getData(), 0, data.size())
+        Reader reader = Entry.newBuilder()
+                .setData(data.retain().slice())
                 .setLogSegmentInfo(lssn, startSequenceId)
                 .setEntryId(entryId)
                 .deserializeRecordSet(deserializeRecordSet)
-                .skipTo(skipTo)
-                .build();
-        Reader reader = recordSet.reader();
+                .buildReader();
+        reader.skipTo(skipTo);
 
         LogRecordWithDLSN record;
         for (int i = 0; i < firstNumRecords; i++) { // first
@@ -336,6 +341,7 @@ public class TestEntry {
             ++expectedTxId;
         }
 
+        reader.release();
     }
 
 

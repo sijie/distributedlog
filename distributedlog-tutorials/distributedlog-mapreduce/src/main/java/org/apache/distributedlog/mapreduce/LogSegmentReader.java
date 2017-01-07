@@ -101,8 +101,6 @@ class LogSegmentReader extends RecordReader<DLSN, LogRecordWithDLSN> {
                         .setLogSegmentInfo(metadata.getLogSegmentSequenceNumber(),
                                 metadata.getStartSequenceId())
                         .setEntryId(entry.getEntryId())
-                        .setEnvelopeEntry(
-                                LogSegmentMetadata.supportsEnvelopedEntries(metadata.getVersion()))
                         .deserializeRecordSet(true)
                         .setInputStream(entry.getEntryInputStream())
                         .buildReader();

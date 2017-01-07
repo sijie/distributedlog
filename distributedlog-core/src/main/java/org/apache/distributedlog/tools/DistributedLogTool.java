@@ -1675,7 +1675,6 @@ public class DistributedLogTool extends Tool {
             Entry.Reader reader = Entry.newBuilder()
                     .setLogSegmentInfo(segment.getLogSegmentSequenceNumber(), segment.getStartSequenceId())
                     .setEntryId(lastEntry.getEntryId())
-                    .setEnvelopeEntry(LogSegmentMetadata.supportsEnvelopedEntries(segment.getVersion()))
                     .setInputStream(lastEntry.getEntryInputStream())
                     .buildReader();
             LogRecordWithDLSN record = reader.nextRecord();
@@ -1684,6 +1683,7 @@ public class DistributedLogTool extends Tool {
                 lastRecord = record;
                 record = reader.nextRecord();
             }
+            reader.release();
             if (null == lastRecord) {
                 throw new IOException("No record found in entry " + lac + " for " + segment);
             }
@@ -2286,9 +2286,9 @@ public class DistributedLogTool extends Tool {
                                     .setLogSegmentInfo(lh.getId(), 0L)
                                     .setEntryId(eid)
                                     .setInputStream(rr.getValue())
-                                    .setEnvelopeEntry(LogSegmentMetadata.supportsEnvelopedEntries(metadataVersion))
                                     .buildReader();
                             printEntry(reader);
+                            reader.release();
                         } else {
                             System.out.println("status = " + BKException.getMessage(rr.getResultCode()));
                         }
@@ -2345,9 +2345,9 @@ public class DistributedLogTool extends Tool {
                         .setLogSegmentInfo(0L, 0L)
                         .setEntryId(entry.getEntryId())
                         .setInputStream(entry.getEntryInputStream())
-                        .setEnvelopeEntry(LogSegmentMetadata.supportsEnvelopedEntries(metadataVersion))
                         .buildReader();
                 printEntry(reader);
+                reader.release();
                 ++i;
             }
         }

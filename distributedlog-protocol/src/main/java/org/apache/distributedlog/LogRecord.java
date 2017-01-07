@@ -206,7 +206,7 @@ public class LogRecord {
     }
 
     /**
-     * Set payload buffer for this log record
+     * Set payload buffer for this log record.
      *
      * @param buffer payload buffer of this log record.
      */
@@ -467,6 +467,10 @@ public class LogRecord {
                     }
                 }
 
+                if (in.readableBytes() <= 0) {
+                    break;
+                }
+
                 try {
                     long metadata = in.readLong();
                     // Reading the first 8 bytes positions the record stream on the correct log record
@@ -525,6 +529,9 @@ public class LogRecord {
 
                     // if there is not record set, read next record
                     if (null == recordSetReader) {
+                        if (in.readableBytes() <= 0) {
+                            break;
+                        }
                         in.markReaderIndex();
                         flags = in.readLong();
                         currTxId = in.readLong();

@@ -342,6 +342,7 @@ public class TestReadAheadEntryReader extends TestDistributedLogBase {
         assertEquals(2L, entryReader.getLSSN());
         assertEquals(1L, entryReader.getEntryId());
         Utils.close(readAheadEntryReader);
+        entryReader.release();
 
         // positioning on a partially truncated log segment (segment 2) before min active dlsn
         readAheadEntryReader = createEntryReader(streamName, new DLSN(2L, 0L, 0L), dlm, baseConf);
@@ -354,6 +355,7 @@ public class TestReadAheadEntryReader extends TestDistributedLogBase {
         assertEquals(2L, entryReader.getLSSN());
         assertEquals(1L, entryReader.getEntryId());
         Utils.close(readAheadEntryReader);
+        entryReader.release();
 
         // positioning on a partially truncated log segment (segment 2) after min active dlsn
         readAheadEntryReader = createEntryReader(streamName, new DLSN(2L, 2L, 0L), dlm, baseConf);
@@ -366,6 +368,7 @@ public class TestReadAheadEntryReader extends TestDistributedLogBase {
         assertEquals(2L, entryReader.getLSSN());
         assertEquals(2L, entryReader.getEntryId());
         Utils.close(readAheadEntryReader);
+        entryReader.release();
 
         Utils.close(writer);
         dlm.close();

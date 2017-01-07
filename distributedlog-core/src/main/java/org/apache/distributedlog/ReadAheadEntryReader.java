@@ -43,6 +43,7 @@ import org.apache.bookkeeper.versioning.Versioned;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import scala.Function1;
+import scala.runtime.AbstractFunction0;
 import scala.runtime.AbstractFunction1;
 import scala.runtime.BoxedUnit;
 
@@ -505,7 +506,19 @@ public class ReadAheadEntryReader implements
         for (SegmentReader reader : segmentReadersToClose) {
             closeFutures.add(reader.close());
         }
-        Futures.collect(closeFutures).proxyTo(closePromise);
+        Futures.collect(closeFutures)
+                .ensure(new AbstractFunction0<BoxedUnit>() {
+                    @Override
+                    public BoxedUnit apply() {
+                        // return the entries to pool
+                        Entry.Reader entry;
+                        while ((entry = entryQueue.poll()) != null) {
+                            entry.release();
+                        }
+                        return BoxedUnit.UNIT;
+                    }
+                })
+                .proxyTo(closePromise);
     }
 
     //

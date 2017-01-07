@@ -78,7 +78,6 @@ class BKLogSegmentRandomAccessEntryReader implements
         return Entry.newBuilder()
                 .setLogSegmentInfo(lssn, startSequenceId)
                 .setEntryId(entry.getEntryId())
-                .setEnvelopeEntry(envelopeEntries)
                 .deserializeRecordSet(deserializeRecordSet)
                 .setInputStream(entry.getEntryInputStream())
                 .buildReader();

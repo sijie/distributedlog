@@ -247,6 +247,9 @@ public class BKLogSegmentEntryReader implements Runnable, LogSegmentEntryReader,
 
         void setException(Throwable throwable) {
             FutureUtils.setException(promise, throwable);
+            for (Entry.Reader entry : entries) {
+                entry.release();
+            }
         }
 
         void addEntry(Entry.Reader entry) {
@@ -623,7 +626,6 @@ public class BKLogSegmentEntryReader implements Runnable, LogSegmentEntryReader,
         return Entry.newBuilder()
                 .setLogSegmentInfo(lssn, startSequenceId)
                 .setEntryId(entry.getEntryId())
-                .setEnvelopeEntry(envelopeEntries)
                 .deserializeRecordSet(deserializeRecordSet)
                 .setInputStream(entry.getEntryInputStream())
                 .buildReader();

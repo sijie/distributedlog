@@ -21,12 +21,13 @@ import io.netty.buffer.ByteBuf;
 import java.io.IOException;
 import org.apache.distributedlog.exceptions.InvalidEnvelopedEntryException;
 import org.apache.distributedlog.io.TransmitListener;
+import org.apache.distributedlog.util.ReferenceCounted;
 
 /**
  * Write representation of a {@link Entry}.
  * It is a buffer of log record set, used for transmission.
  */
-public interface EntryBuffer extends TransmitListener {
+public interface EntryBuffer extends TransmitListener, ReferenceCounted {
 
     /**
      * Return if this record set contains user records.
