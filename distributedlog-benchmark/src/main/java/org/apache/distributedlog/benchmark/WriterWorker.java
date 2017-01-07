@@ -19,7 +19,9 @@ package org.apache.distributedlog.benchmark;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
-import com.twitter.common.zookeeper.ServerSet;
+import com.google.common.base.Function;
+import com.google.common.collect.Lists;
+import io.netty.buffer.ByteBuf;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.benchmark.utils.ShiftableRateLimiter;
 import org.apache.distributedlog.client.DistributedLogMultiStreamWriter;
@@ -29,6 +31,7 @@ import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.service.DistributedLogClient;
 import org.apache.distributedlog.service.DistributedLogClientBuilder;
 import org.apache.distributedlog.util.SchedulerUtils;
+import com.twitter.common.zookeeper.ServerSet;
 import com.twitter.finagle.builder.ClientBuilder;
 import com.twitter.finagle.stats.StatsReceiver;
 import com.twitter.finagle.thrift.ClientId;
@@ -45,9 +48,9 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
-import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,6 +60,13 @@ import org.slf4j.LoggerFactory;
 public class WriterWorker implements Worker {
 
     static final Logger LOG = LoggerFactory.getLogger(WriterWorker.class);
+
+    static Function<ByteBuf, ByteBuffer> BYTEBUF_TO_NIO_BYTEBUFFER = new Function<ByteBuf, ByteBuffer>() {
+        @Override
+        public ByteBuffer apply(@Nullable ByteBuf byteBuf) {
+            return byteBuf.nioBuffer();
+        }
+    };
 
     final String streamPrefix;
     final int startStreamId;
@@ -223,21 +233,14 @@ public class WriterWorker implements Worker {
         return builder.build();
     }
 
-    ByteBuffer buildBuffer(long requestMillis, int messageSizeBytes) {
-        ByteBuffer data;
-        try {
-            data = ByteBuffer.wrap(Utils.generateMessage(requestMillis, messageSizeBytes));
-            return data;
-        } catch (TException e) {
-            LOG.error("Error generating message : ", e);
-            return null;
-        }
+    ByteBuf buildBuffer(long requestMillis, int messageSizeBytes) {
+        return Utils.generateMessage(requestMillis, messageSizeBytes);
     }
 
-    List<ByteBuffer> buildBufferList(int batchSize, long requestMillis, int messageSizeBytes) {
-        ArrayList<ByteBuffer> bufferList = new ArrayList<ByteBuffer>(batchSize);
+    List<ByteBuf> buildBufferList(int batchSize, long requestMillis, int messageSizeBytes) {
+        ArrayList<ByteBuf> bufferList = new ArrayList<ByteBuf>(batchSize);
         for (int i = 0; i < batchSize; i++) {
-            ByteBuffer buf = buildBuffer(requestMillis, messageSizeBytes);
+            ByteBuf buf = buildBuffer(requestMillis, messageSizeBytes);
             if (null == buf) {
                 return null;
             }
@@ -249,23 +252,45 @@ public class WriterWorker implements Worker {
     class TimedRequestHandler implements FutureEventListener<DLSN>, Runnable {
         final String streamName;
         final long requestMillis;
+        final ByteBuf buffer;
+        final List<ByteBuf> buffers;
         DLSN dlsn = null;
         Throwable cause = null;
 
         TimedRequestHandler(String streamName,
-                            long requestMillis) {
+                            long requestMillis,
+                            ByteBuf buffer,
+                            List<ByteBuf> buffers) {
             this.streamName = streamName;
             this.requestMillis = requestMillis;
+            this.buffer = buffer;
+            this.buffers = buffers;
         }
         @Override
         public void onSuccess(DLSN value) {
             dlsn = value;
             executor.submit(this);
+            if (null != buffer) {
+                buffer.release();
+            }
+            if (null != buffers) {
+                for (ByteBuf buf : buffers) {
+                    buf.release();
+                }
+            }
         }
         @Override
         public void onFailure(Throwable cause) {
             this.cause = cause;
             executor.submit(this);
+            if (null != buffer) {
+                buffer.release();
+            }
+            if (null != buffers) {
+                for (ByteBuf buf : buffers) {
+                    buf.release();
+                }
+            }
         }
 
         @Override
@@ -317,16 +342,13 @@ public class WriterWorker implements Worker {
                 this.limiter.getLimiter().acquire();
                 final String streamName = streamNames.get(random.nextInt(numStreams));
                 final long requestMillis = System.currentTimeMillis();
-                final ByteBuffer data = buildBuffer(requestMillis, messageSizeBytes);
-                if (null == data) {
-                    break;
-                }
+                final ByteBuf data = buildBuffer(requestMillis, messageSizeBytes);
                 if (null != writer) {
-                    writer.write(data).addEventListener(
-                            new TimedRequestHandler(streamName, requestMillis));
+                    writer.write(data.nioBuffer()).addEventListener(
+                            new TimedRequestHandler(streamName, requestMillis, data, null));
                 } else {
-                    dlc.write(streamName, data).addEventListener(
-                            new TimedRequestHandler(streamName, requestMillis));
+                    dlc.write(streamName, data.nioBuffer()).addEventListener(
+                            new TimedRequestHandler(streamName, requestMillis, data, null));
                 }
             }
             if (null != writer) {
@@ -353,13 +375,11 @@ public class WriterWorker implements Worker {
                 rateLimiter.getLimiter().acquire(batchSize);
                 String streamName = streamNames.get(random.nextInt(numStreams));
                 final long requestMillis = System.currentTimeMillis();
-                final List<ByteBuffer> data = buildBufferList(batchSize, requestMillis, messageSizeBytes);
-                if (null == data) {
-                    break;
-                }
-                List<Future<DLSN>> results = dlc.writeBulk(streamName, data);
+                final List<ByteBuf> data = buildBufferList(batchSize, requestMillis, messageSizeBytes);
+                final List<ByteBuffer> buffers = Lists.transform(data, BYTEBUF_TO_NIO_BYTEBUFFER);
+                List<Future<DLSN>> results = dlc.writeBulk(streamName, buffers);
                 for (Future<DLSN> result : results) {
-                    result.addEventListener(new TimedRequestHandler(streamName, requestMillis));
+                    result.addEventListener(new TimedRequestHandler(streamName, requestMillis, null, data));
                 }
             }
             dlc.close();

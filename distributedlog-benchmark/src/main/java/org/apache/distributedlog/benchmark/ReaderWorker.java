@@ -28,7 +28,6 @@ import org.apache.distributedlog.DistributedLogConfiguration;
 import org.apache.distributedlog.DistributedLogManager;
 import org.apache.distributedlog.LogRecordSet;
 import org.apache.distributedlog.LogRecordWithDLSN;
-import org.apache.distributedlog.benchmark.thrift.Message;
 import org.apache.distributedlog.client.serverset.DLZkServerSet;
 import org.apache.distributedlog.exceptions.DLInterruptedException;
 import org.apache.distributedlog.namespace.DistributedLogNamespace;
@@ -57,7 +56,6 @@ import org.apache.bookkeeper.stats.Counter;
 import org.apache.bookkeeper.stats.Gauge;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
-import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,17 +139,9 @@ public class ReaderWorker implements Worker {
         }
 
         public void processRecord(final LogRecordWithDLSN record) {
-            Message msg;
-            try {
-                msg = Utils.parseMessage(record.getPayload());
-            } catch (TException e) {
-                invalidRecordsCounter.inc();
-                LOG.warn("Failed to parse record {} for stream {} : size = {} , ",
-                         new Object[] { record, streamIdx, record.getPayload().length, e });
-                return;
-            }
++           long publishTime = Utils.parseMessage(record.getPayloadBuffer());
             long curTimeMillis = System.currentTimeMillis();
-            long e2eLatency = curTimeMillis - msg.getPublishTime();
+            long e2eLatency = curTimeMillis - publishTime;
             long deliveryLatency = curTimeMillis - record.getTransactionId();
             if (e2eLatency >= 0) {
                 e2eStat.registerSuccessfulEvent(e2eLatency);

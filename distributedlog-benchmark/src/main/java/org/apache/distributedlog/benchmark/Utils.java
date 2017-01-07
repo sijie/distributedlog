@@ -17,13 +17,11 @@
  */
 package org.apache.distributedlog.benchmark;
 
-import org.apache.distributedlog.benchmark.thrift.Message;
+import static org.apache.distributedlog.buffer.BufferPool.ALLOCATOR;
+
+import io.netty.buffer.ByteBuf;
 import java.nio.ByteBuffer;
 import java.util.Random;
-import org.apache.thrift.TException;
-import org.apache.thrift.TSerializer;
-import org.apache.thrift.protocol.TBinaryProtocol;
-import org.apache.thrift.transport.TMemoryInputTransport;
 
 /**
  * Utils for generating and parsing messages.
@@ -31,27 +29,26 @@ import org.apache.thrift.transport.TMemoryInputTransport;
 public class Utils {
 
     static final Random RAND = new Random(System.currentTimeMillis());
-    static final ThreadLocal<TSerializer> MSG_SERIALIZER =
-            new ThreadLocal<TSerializer>() {
-                @Override
-                public TSerializer initialValue() {
-                    return new TSerializer(new TBinaryProtocol.Factory());
-                }
-            };
+    static final byte[] DATA;
 
-    public static byte[] generateMessage(long requestMillis, int payLoadSize) throws TException {
-        byte[] payload = new byte[payLoadSize];
-        RAND.nextBytes(payload);
-        Message msg = new Message(requestMillis, ByteBuffer.wrap(payload));
-        return MSG_SERIALIZER.get().serialize(msg);
+    static {
+        DATA = new byte[512];
+        RAND.nextBytes(DATA);
     }
 
-    public static Message parseMessage(byte[] data) throws TException {
-        Message msg = new Message();
-        TMemoryInputTransport transport = new TMemoryInputTransport(data);
-        TBinaryProtocol protocol = new TBinaryProtocol(transport);
-        msg.read(protocol);
-        return msg;
+    public static ByteBuf generateMessage(long requestMillis, int payLoadSize) {
+        ByteBuf buf = ALLOCATOR.buffer(8 + payLoadSize);
+        buf.writeLong(requestMillis);
+
+        while (buf.writableBytes() > 0) {
+            int bytesToWrite = Math.min(DATA.length, buf.writableBytes());
+            buf.writeBytes(DATA, 0, bytesToWrite);
+        }
+        return buf;
+    }
+
+    public static long parseMessage(ByteBuffer buffer) {
+        return buffer.getLong();
     }
 
 }

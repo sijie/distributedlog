@@ -19,6 +19,7 @@ package org.apache.distributedlog.benchmark;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import io.netty.buffer.ByteBuf;
 import org.apache.distributedlog.AsyncLogWriter;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.DistributedLogConfiguration;
@@ -44,7 +45,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
-import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -218,22 +218,18 @@ public class DLWriterWorker implements Worker {
                 final AsyncLogWriter writer = streamWriters.get(streamIdx);
                 rateLimiter.getLimiter().acquire();
                 final long requestMillis = System.currentTimeMillis();
-                final byte[] data;
-                try {
-                    data = Utils.generateMessage(requestMillis, messageSizeBytes);
-                } catch (TException e) {
-                    LOG.error("Error on generating message : ", e);
-                    break;
-                }
-                writer.write(new LogRecord(requestMillis, data)).addEventListener(new FutureEventListener<DLSN>() {
+                final ByteBuf buf = Utils.generateMessage(requestMillis, messageSizeBytes);
+                writer.write(new LogRecord(requestMillis, buf.nioBuffer())).addEventListener(new FutureEventListener<DLSN>() {
                     @Override
                     public void onSuccess(DLSN value) {
                         requestStat.registerSuccessfulEvent(System.currentTimeMillis() - requestMillis);
+                        buf.release();
                     }
 
                     @Override
                     public void onFailure(Throwable cause) {
                         requestStat.registerFailedEvent(System.currentTimeMillis() - requestMillis);
+                        buf.release();
                         LOG.error("Failed to publish, rescue it : ", cause);
                         scheduleRescue(streamIdx, writer, 0);
                     }
