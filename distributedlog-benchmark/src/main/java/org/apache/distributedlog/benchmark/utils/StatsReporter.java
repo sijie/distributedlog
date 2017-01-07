@@ -26,7 +26,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Stats Report
+ * Stats Reporter.
  */
 public class StatsReporter implements Runnable {
 

@@ -61,7 +61,7 @@ public class WriterWorker implements Worker {
 
     static final Logger LOG = LoggerFactory.getLogger(WriterWorker.class);
 
-    static Function<ByteBuf, ByteBuffer> BYTEBUF_TO_NIO_BYTEBUFFER = new Function<ByteBuf, ByteBuffer>() {
+    private static final Function<ByteBuf, ByteBuffer> BYTEBUF_TO_NIO_BYTEBUFFER = new Function<ByteBuf, ByteBuffer>() {
         @Override
         public ByteBuffer apply(@Nullable ByteBuf byteBuf) {
             return byteBuf.nioBuffer();
