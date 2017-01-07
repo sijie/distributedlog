@@ -79,7 +79,7 @@ class LogSegmentReader extends RecordReader<DLSN, LogRecordWithDLSN> {
         LogRecordWithDLSN record;
         currentRecord = null;
         if (null != reader) {
-            record = reader.nextRecord();
+            record = reader.nextRecord(true);
             if (null != record) {
                 currentRecord = record;
                 readPos = record.getPositionWithinLogSegment();
@@ -97,6 +97,9 @@ class LogSegmentReader extends RecordReader<DLSN, LogRecordWithDLSN> {
                     lh.readEntries(entryId, entryId);
             if (entries.hasMoreElements()) {
                 LedgerEntry entry = entries.nextElement();
+                if (null != reader) {
+                    reader.release();
+                }
                 reader = Entry.newBuilder()
                         .setLogSegmentInfo(metadata.getLogSegmentSequenceNumber(),
                                 metadata.getStartSequenceId())
