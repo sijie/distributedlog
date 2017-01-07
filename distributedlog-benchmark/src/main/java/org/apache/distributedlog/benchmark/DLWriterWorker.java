@@ -267,7 +267,7 @@ public class DLWriterWorker implements Worker {
         public void run() {
             LOG.info("Started writer {}.", idx);
             while (running) {
-                // rateLimiter.getLimiter().acquire();
+                rateLimiter.getLimiter().acquire();
                 final long requestMillis = System.currentTimeMillis();
                 final ByteBuf buf = Utils.generateMessage(requestMillis, messageSizeBytes);
                 write(buf.nioBuffer()).addEventListener(new FutureEventListener<DLSN>() {

@@ -183,10 +183,12 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer, ReferenceCounted 
     @Override
     public void completeTransmit(long lssn, long entryId, long startSlotId) {
         satisfyPromises(lssn, entryId, startSlotId);
+        release();
     }
 
     @Override
     public void abortTransmit(Throwable reason) {
         cancelPromises(reason);
+        release();
     }
 }
