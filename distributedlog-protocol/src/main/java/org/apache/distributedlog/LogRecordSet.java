@@ -119,7 +119,8 @@ public class LogRecordSet {
                 dlsn.getSlotId(),
                 startPosition,
                 startSequenceId,
-                Unpooled.wrappedBuffer(buffer));
+                Unpooled.wrappedBuffer(buffer),
+                allocateBuffer);
     }
 
     /**
