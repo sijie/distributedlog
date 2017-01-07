@@ -60,7 +60,7 @@ public class TestEntry {
                 .setEntryId(0L)
                 .buildReader();
         Assert.assertNull("Empty record set should return null",
-                reader.nextRecord());
+                reader.nextRecord(false));
         reader.release();
         writer.release();
     }
@@ -149,7 +149,7 @@ public class TestEntry {
                 .setLogSegmentInfo(1L, 1L)
                 .setEntryId(0L)
                 .buildReader();
-        LogRecordWithDLSN record = reader.nextRecord();
+        LogRecordWithDLSN record = reader.nextRecord(false);
         int numReads = 0;
         long expectedTxid = 0L;
         while (null != record) {
@@ -158,7 +158,7 @@ public class TestEntry {
             Assert.assertEquals(new DLSN(1L, 0L, expectedTxid), record.getDlsn());
             ++numReads;
             ++expectedTxid;
-            record = reader.nextRecord();
+            record = reader.nextRecord(false);
         }
         reader.release();
         writer.release();
@@ -290,7 +290,7 @@ public class TestEntry {
 
         LogRecordWithDLSN record;
         for (int i = 0; i < firstNumRecords; i++) { // first
-            record = reader.nextRecord();
+            record = reader.nextRecord(false);
             assertNotNull(record);
             assertEquals(expectedDLSN, record.getDlsn());
             assertEquals(expectedTxId, record.getTransactionId());
@@ -308,7 +308,7 @@ public class TestEntry {
         if (verifyDeserializedRecords) {
             long txIdOfRecordSet = 5;
             for (int i = 0; i < secondNumRecords; i++) {
-                record = reader.nextRecord();
+                record = reader.nextRecord(false);
                 assertNotNull(record);
                 assertEquals(expectedDLSN, record.getDlsn());
                 assertEquals(txIdOfRecordSet, record.getTransactionId());
@@ -319,7 +319,7 @@ public class TestEntry {
                 ++expectedTxId;
             }
         } else {
-            record = reader.nextRecord();
+            record = reader.nextRecord(false);
             assertNotNull(record);
             assertEquals(expectedDLSN, record.getDlsn());
             assertEquals(expectedTxId, record.getTransactionId());
@@ -330,7 +330,7 @@ public class TestEntry {
         }
 
         for (int i = 0; i < lastNumRecords; i++) {
-            record = reader.nextRecord();
+            record = reader.nextRecord(false);
             assertNotNull(record);
             assertEquals(expectedDLSN, record.getDlsn());
             assertEquals(expectedTxId, record.getTransactionId());

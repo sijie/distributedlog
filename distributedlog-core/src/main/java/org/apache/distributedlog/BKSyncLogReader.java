@@ -181,7 +181,7 @@ class BKSyncLogReader implements LogReader, AsyncNotification {
                         return null;
                     }
                 }
-                record = currentEntry.nextRecord();
+                record = currentEntry.nextRecord(true);
                 if (null == record) {
                     currentEntry.release();
                     currentEntry = null;

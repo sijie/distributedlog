@@ -1677,11 +1677,11 @@ public class DistributedLogTool extends Tool {
                     .setEntryId(lastEntry.getEntryId())
                     .setInputStream(lastEntry.getEntryInputStream())
                     .buildReader();
-            LogRecordWithDLSN record = reader.nextRecord();
+            LogRecordWithDLSN record = reader.nextRecord(false);
             LogRecordWithDLSN lastRecord = null;
             while (null != record) {
                 lastRecord = record;
-                record = reader.nextRecord();
+                record = reader.nextRecord(false);
             }
             reader.release();
             if (null == lastRecord) {
@@ -2353,7 +2353,7 @@ public class DistributedLogTool extends Tool {
         }
 
         private void printEntry(Entry.Reader reader) throws Exception {
-            LogRecordWithDLSN record = reader.nextRecord();
+            LogRecordWithDLSN record = reader.nextRecord(false);
             while (null != record) {
                 System.out.println("\t" + record);
                 if (!skipPayload) {
@@ -2364,7 +2364,7 @@ public class DistributedLogTool extends Tool {
                     }
                 }
                 System.out.println("");
-                record = reader.nextRecord();
+                record = reader.nextRecord(false);
             }
         }
 

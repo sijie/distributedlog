@@ -95,9 +95,9 @@ class EnvelopedEntryReader implements Entry.Reader, RecordStream {
     }
 
     @Override
-    public LogRecordWithDLSN nextRecord()
+    public LogRecordWithDLSN nextRecord(boolean allocateBuffer)
             throws IOException {
-        return reader.readOp();
+        return reader.readOp(allocateBuffer);
     }
 
     @Override
