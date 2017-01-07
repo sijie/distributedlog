@@ -21,6 +21,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
+import com.twitter.finagle.stats.NullStatsReceiver;
 import io.netty.buffer.ByteBuf;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.benchmark.utils.ShiftableRateLimiter;
@@ -33,7 +34,6 @@ import org.apache.distributedlog.service.DistributedLogClientBuilder;
 import org.apache.distributedlog.util.SchedulerUtils;
 import com.twitter.common.zookeeper.ServerSet;
 import com.twitter.finagle.builder.ClientBuilder;
-import com.twitter.finagle.stats.StatsReceiver;
 import com.twitter.finagle.thrift.ClientId;
 import com.twitter.finagle.thrift.ClientId$;
 import com.twitter.util.Duration$;
@@ -95,7 +95,6 @@ public class WriterWorker implements Worker {
 
     volatile boolean running = true;
 
-    final StatsReceiver statsReceiver;
     final StatsLogger statsLogger;
     final OpStatsLogger requestStat;
     final StatsLogger exceptionsLogger;
@@ -116,7 +115,6 @@ public class WriterWorker implements Worker {
                         int hostConnectionLimit,
                         List<String> serverSetPaths,
                         List<String> finagleNames,
-                        StatsReceiver statsReceiver,
                         StatsLogger statsLogger,
                         boolean thriftmux,
                         boolean handshakeWithClientInfo,
@@ -135,7 +133,6 @@ public class WriterWorker implements Worker {
         this.rateLimiter = rateLimiter;
         this.writeConcurrency = writeConcurrency;
         this.messageSizeBytes = messageSizeBytes;
-        this.statsReceiver = statsReceiver;
         this.statsLogger = statsLogger;
         this.requestStat = this.statsLogger.getOpStatsLogger("requests");
         this.exceptionsLogger = statsLogger.scope("exceptions");
@@ -203,7 +200,7 @@ public class WriterWorker implements Worker {
             .redirectBackoffStartMs(100)
             .redirectBackoffMaxMs(500)
             .requestTimeoutMs(10000)
-            .statsReceiver(statsReceiver)
+            .statsReceiver(NullStatsReceiver.get())
             .streamNameRegex("^" + streamPrefix + "_[0-9]+$")
             .handshakeWithClientInfo(handshakeWithClientInfo)
             .periodicHandshakeIntervalMs(TimeUnit.SECONDS.toMillis(30))

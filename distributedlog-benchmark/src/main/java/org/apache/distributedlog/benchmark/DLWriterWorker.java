@@ -18,22 +18,16 @@
 package org.apache.distributedlog.benchmark;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static org.apache.distributedlog.LogRecord.MAX_LOGRECORDSET_SIZE;
-import static org.apache.distributedlog.LogRecord.MAX_LOGRECORD_SIZE;
 
-import com.twitter.util.Future;
-import com.twitter.util.Promise;
 import io.netty.buffer.ByteBuf;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.distributedlog.AsyncLogWriter;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.DistributedLogConfiguration;
 import org.apache.distributedlog.DistributedLogManager;
 import org.apache.distributedlog.LogRecord;
-import org.apache.distributedlog.LogRecordSet;
 import org.apache.distributedlog.benchmark.utils.ShiftableRateLimiter;
 import org.apache.distributedlog.benchmark.utils.StatsReporter;
-import org.apache.distributedlog.exceptions.LogRecordTooLongException;
-import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.namespace.DistributedLogNamespace;
 import org.apache.distributedlog.namespace.DistributedLogNamespaceBuilder;
 import org.apache.distributedlog.util.FutureUtils;
@@ -42,7 +36,6 @@ import org.apache.distributedlog.util.SchedulerUtils;
 import com.twitter.util.FutureEventListener;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -224,21 +217,11 @@ public class DLWriterWorker implements Worker {
 
     class Writer implements Runnable {
 
-        static final int BUFFER_SIZE = 16 * 1024;
-
         final int idx;
         final int[] streams;
-        LogRecordSet.Writer recordSetWriter;
-        final Runnable flusher = new Runnable() {
-            @Override
-            public void run() {
-                flush();
-            }
-        };
 
         Writer(int idx) {
             this.idx = idx;
-            this.recordSetWriter = newRecordSetWriter();
             int numStreamsPerWriter = numStreams / writeConcurrency;
             int startStreamIdx = idx * numStreamsPerWriter;
             int endStreamIdx = (idx + 1) * numStreamsPerWriter;
@@ -249,28 +232,19 @@ public class DLWriterWorker implements Worker {
             for (int i = 0; i < streams.length; i++) {
                 streams[i] = startStreamIdx + i;
             }
-            scheduler.scheduleAtFixedRate(
-                    idx,
-                    flusher,
-                    1,
-                    1,
-                    TimeUnit.MILLISECONDS);
-        }
-
-        private LogRecordSet.Writer newRecordSetWriter() {
-            return LogRecordSet.newWriter(
-                    BUFFER_SIZE,
-                    CompressionCodec.Type.NONE);
         }
 
         @Override
         public void run() {
-            LOG.info("Started writer {}.", idx);
+            LOG.info("Started writer {} @ streams {}.",
+                    idx, StringUtils.join(streams, ','));
             while (running) {
                 rateLimiter.getLimiter().acquire();
+                final int streamId = Utils.RAND.nextInt(streams.length);
                 final long requestMillis = System.currentTimeMillis();
                 final ByteBuf buf = Utils.generateMessage(requestMillis, messageSizeBytes);
-                write(buf.nioBuffer()).addEventListener(new FutureEventListener<DLSN>() {
+                final LogRecord record = new LogRecord(requestMillis, buf.nioBuffer());
+                streamWriters.get(streams[streamId]).write(record).addEventListener(new FutureEventListener<DLSN>() {
                     @Override
                     public void onSuccess(DLSN value) {
                         requestStat.registerSuccessfulEvent(System.currentTimeMillis() - requestMillis);
@@ -286,62 +260,6 @@ public class DLWriterWorker implements Worker {
             }
         }
 
-        public Future<DLSN> write(ByteBuffer buffer) {
-            int logRecordSize = buffer.remaining();
-            if (logRecordSize > MAX_LOGRECORD_SIZE) {
-                return Future.exception(new LogRecordTooLongException(
-                        "Log record of size " + logRecordSize + " written when only "
-                                + MAX_LOGRECORD_SIZE + " is allowed"));
-            }
-            // if exceed max number of bytes
-            if ((recordSetWriter.getNumBytes() + logRecordSize) > MAX_LOGRECORDSET_SIZE) {
-                flush();
-            }
-            Promise<DLSN> writePromise = new Promise<DLSN>();
-            try {
-                recordSetWriter.writeRecord(buffer, writePromise);
-            } catch (LogRecordTooLongException e) {
-                return Future.exception(e);
-            }
-            if (recordSetWriter.getNumBytes() >= BUFFER_SIZE) {
-                flush();
-            }
-            return writePromise;
-        }
-
-        private void flush() {
-            final LogRecordSet.Writer recordSetToFlush;
-            synchronized (this) {
-                if (recordSetWriter.getNumRecords() == 0) {
-                    return;
-                }
-                recordSetToFlush = recordSetWriter;
-                recordSetWriter = newRecordSetWriter();
-            }
-            final int streamIdx = random.nextInt(streams.length);
-            final AsyncLogWriter writer = streamWriters.get(streams[streamIdx]);
-            final long requestMillis = System.currentTimeMillis();
-            ByteBuffer buffer = recordSetToFlush.getBuffer();
-            LogRecord recordSet = new LogRecord(requestMillis, buffer);
-            recordSet.setControl();
-            writer.write(recordSet)
-                    .addEventListener(new FutureEventListener<DLSN>() {
-                @Override
-                public void onFailure(Throwable cause) {
-                    recordSetToFlush.abortTransmit(cause);
-                    LOG.error("Failed to publish, rescue it : ", cause);
-                    scheduleRescue(streamIdx, writer, 0);
-                }
-
-                @Override
-                public void onSuccess(DLSN value) {
-                    recordSetToFlush.completeTransmit(
-                            value.getLogSegmentSequenceNo(),
-                            value.getEntryId(),
-                            value.getSlotId());
-                }
-            });
-        }
     }
 
 }

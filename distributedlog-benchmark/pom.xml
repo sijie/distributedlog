@@ -37,11 +37,6 @@
       <version>${project.parent.version}</version>
     </dependency>
     <dependency>
-      <groupId>com.twitter</groupId>
-      <artifactId>finagle-ostrich4_2.11</artifactId>
-      <version>${birdcage.sha}</version>
-    </dependency>
-    <dependency>
       <groupId>org.apache.distributedlog</groupId>
       <artifactId>distributedlog-core</artifactId>
       <version>${project.parent.version}</version>

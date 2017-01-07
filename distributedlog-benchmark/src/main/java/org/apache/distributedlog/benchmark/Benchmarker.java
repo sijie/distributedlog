@@ -22,8 +22,6 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import org.apache.distributedlog.DistributedLogConfiguration;
 import org.apache.distributedlog.benchmark.utils.ShiftableRateLimiter;
-import com.twitter.finagle.stats.OstrichStatsReceiver;
-import com.twitter.finagle.stats.StatsReceiver;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -88,7 +86,6 @@ public class Benchmarker {
     String routingServiceFinagleNameString;
 
     final DistributedLogConfiguration conf = new DistributedLogConfiguration();
-    final StatsReceiver statsReceiver = new OstrichStatsReceiver();
     StatsProvider statsProvider = null;
 
     Benchmarker(String[] args) {
@@ -308,7 +305,6 @@ public class Benchmarker {
                 hostConnectionLimit,
                 serversetPaths,
                 finagleNames,
-                statsReceiver.scope("write_client"),
                 statsProvider.getStatsLogger("write"),
                 thriftmux,
                 handshakeWithClientInfo,
@@ -333,7 +329,6 @@ public class Benchmarker {
             int hostConnectionLimit,
             List<String> serverSetPaths,
             List<String> finagleNames,
-            StatsReceiver statsReceiver,
             StatsLogger statsLogger,
             boolean thriftmux,
             boolean handshakeWithClientInfo,
@@ -356,7 +351,6 @@ public class Benchmarker {
                 hostConnectionLimit,
                 serverSetPaths,
                 finagleNames,
-                statsReceiver,
                 statsLogger,
                 thriftmux,
                 handshakeWithClientInfo,
@@ -424,7 +418,6 @@ public class Benchmarker {
                 finagleNames,
                 truncationInterval,
                 readFromHead,
-                statsReceiver,
                 statsProvider.getStatsLogger("dlreader"));
     }
 
@@ -439,7 +432,6 @@ public class Benchmarker {
             List<String> finagleNames,
             int truncationIntervalInSeconds,
             boolean readFromHead, /* read from the earliest data of log */
-            StatsReceiver statsReceiver,
             StatsLogger statsLogger) throws IOException {
         return new ReaderWorker(
                 conf,
@@ -452,7 +444,6 @@ public class Benchmarker {
                 finagleNames,
                 truncationIntervalInSeconds,
                 readFromHead,
-                statsReceiver,
                 statsLogger);
     }
 

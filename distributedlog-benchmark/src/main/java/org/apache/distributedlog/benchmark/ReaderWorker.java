@@ -22,6 +22,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.twitter.common.zookeeper.ServerSet;
+import com.twitter.finagle.stats.NullStatsReceiver;
 import org.apache.distributedlog.AsyncLogReader;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.DistributedLogConfiguration;
@@ -38,7 +39,6 @@ import org.apache.distributedlog.service.DistributedLogClientBuilder;
 import org.apache.distributedlog.util.FutureUtils;
 import org.apache.distributedlog.util.SchedulerUtils;
 import com.twitter.finagle.builder.ClientBuilder;
-import com.twitter.finagle.stats.StatsReceiver;
 import com.twitter.finagle.thrift.ClientId$;
 import com.twitter.util.Duration$;
 import com.twitter.util.Function;
@@ -90,7 +90,6 @@ public class ReaderWorker implements Worker {
     volatile boolean running = true;
 
     final StatsReporter statsReporter;
-    final StatsReceiver statsReceiver;
     final StatsLogger statsLogger;
     final OpStatsLogger e2eStat;
     final OpStatsLogger deliveryStat;
@@ -227,7 +226,6 @@ public class ReaderWorker implements Worker {
                         List<String> finagleNames,
                         int truncationIntervalInSeconds,
                         boolean readFromHead, /* read from the earliest data of log */
-                        StatsReceiver statsReceiver,
                         StatsLogger statsLogger) throws IOException {
         checkArgument(startStreamId <= endStreamId);
         this.streamPrefix = streamPrefix;
@@ -235,7 +233,6 @@ public class ReaderWorker implements Worker {
         this.endStreamId = endStreamId;
         this.truncationIntervalInSeconds = truncationIntervalInSeconds;
         this.readFromHead = readFromHead;
-        this.statsReceiver = statsReceiver;
         this.statsLogger = statsLogger;
         this.e2eStat = this.statsLogger.getOpStatsLogger("e2e");
         this.negativeE2EStat = this.statsLogger.getOpStatsLogger("e2eNegative");
@@ -268,7 +265,7 @@ public class ReaderWorker implements Worker {
                     .redirectBackoffStartMs(100)
                     .redirectBackoffMaxMs(500)
                     .requestTimeoutMs(2000)
-                    .statsReceiver(statsReceiver)
+                    .statsReceiver(NullStatsReceiver.get())
                     .thriftmux(true)
                     .name("reader");
 

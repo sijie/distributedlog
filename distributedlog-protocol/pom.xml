@@ -86,7 +86,7 @@
     <dependency>
       <groupId>io.netty</groupId>
       <artifactId>netty-buffer</artifactId>
-      <version>RELEASE</version>
+      <version>4.1.6.Final</version>
     </dependency>
   </dependencies>
   <build>
