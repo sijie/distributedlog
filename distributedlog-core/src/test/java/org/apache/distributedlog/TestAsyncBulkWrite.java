@@ -21,7 +21,6 @@ import org.apache.distributedlog.exceptions.LogRecordTooLongException;
 import org.apache.distributedlog.exceptions.WriteCancelledException;
 import org.apache.distributedlog.exceptions.WriteException;
 import org.apache.distributedlog.util.FailpointUtils;
-import org.apache.distributedlog.util.FutureUtils;
 import com.twitter.util.Await;
 import com.twitter.util.Duration;
 import com.twitter.util.Future;
@@ -251,7 +250,7 @@ public class TestAsyncBulkWrite extends TestDistributedLogBase {
         long slotIndex = 0;
         long txIndex = 1;
         DLSN dlsn = checkAllSucceeded(writer, batchSize, recSize, ledgerIndex, entryIndex, slotIndex, txIndex);
-        assertEquals(4, dlsn.getEntryId());
+        assertEquals(407, dlsn.getEntryId());
         assertEquals(1, dlsn.getLogSegmentSequenceNo());
 
         writer.closeAndComplete();
@@ -281,7 +280,7 @@ public class TestAsyncBulkWrite extends TestDistributedLogBase {
         long txIndex = 1;
 
         DLSN dlsn = checkAllSucceeded(writer, batchSize, recSize, ledgerIndex, entryIndex, slotIndex, txIndex);
-        assertEquals(4, dlsn.getEntryId());
+        assertEquals(407, dlsn.getEntryId());
         assertEquals(1, dlsn.getLogSegmentSequenceNo());
 
         FailpointUtils.setFailpoint(
