@@ -420,8 +420,7 @@ public class LogRecord {
         }
 
         // The caller should pass in a heap buffer
-        protected static ByteBuffer readPayload(ByteBuf in,
-                                                boolean allocateBuffer)
+        protected static ByteBuffer readPayload(ByteBuf in)
                 throws IOException {
             int length = in.readInt();
             if (length < 0) {
@@ -430,15 +429,6 @@ public class LogRecord {
             if (length > in.readableBytes()) {
                 throw new IOException("Log record is corrupt : No enough data - length = "
                         + length + " but only " + in.readableBytes() + " is available");
-            }
-            if (!allocateBuffer) {
-                try {
-                    ByteBuffer buffer = in.nioBuffer(in.readerIndex(), length);
-                    in.setIndex(in.readerIndex() + length, in.writerIndex());
-                    return buffer;
-                } catch (UnsupportedOperationException noe) {
-                    LOG.debug("Can't create nio buffer. Then allocate a new nio buffer.", noe);
-                }
             }
             ByteBuffer payload = ByteBuffer.allocate(length);
             in.readBytes(payload);
@@ -456,10 +446,6 @@ public class LogRecord {
          * @throws IOException on error.
          */
         public LogRecordWithDLSN readOp() throws IOException {
-            return readOp(true);
-        }
-
-        LogRecordWithDLSN readOp(boolean allocateBuffer) throws IOException {
             LogRecordWithDLSN nextRecordInStream;
             while (true) {
                 if (lastRecordSkipTo != null) {
@@ -490,7 +476,7 @@ public class LogRecord {
                     // Given that there are 20 bytes following the read position of the previous call
                     // to readLong, we should not have moved ahead in the stream.
                     long txId = in.readLong();
-                    ByteBuffer payload = readPayload(in, allocateBuffer);
+                    ByteBuffer payload = readPayload(in);
                     nextRecordInStream = new LogRecordWithDLSN(
                             recordStream.getCurrentPosition(),
                             startSequenceId,
@@ -513,7 +499,7 @@ public class LogRecord {
                     }
 
                     if (deserializeRecordSet && nextRecordInStream.isRecordSet()) {
-                        recordSetReader = LogRecordSet.of(nextRecordInStream, allocateBuffer);
+                        recordSetReader = LogRecordSet.of(nextRecordInStream);
                     } else {
                         recordStream.advance(numRecords);
                         return nextRecordInStream;
@@ -593,14 +579,14 @@ public class LogRecord {
                     // get the num of records to skip
                     if (isRecordSet(flags)) {
                         // read record set
-                        ByteBuffer payload = readPayload(in, true);
+                        ByteBuffer payload = readPayload(in);
                         LogRecordWithDLSN record = new LogRecordWithDLSN(
                                 recordStream.getCurrentPosition(),
                                 startSequenceId,
                                 currTxId,
                                 payload,
                                 flags);
-                        recordSetReader = LogRecordSet.of(record, true);
+                        recordSetReader = LogRecordSet.of(record);
                     } else {
                         int length = in.readInt();
                         if (length < 0) {

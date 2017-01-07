@@ -79,7 +79,7 @@ class LogSegmentReader extends RecordReader<DLSN, LogRecordWithDLSN> {
         LogRecordWithDLSN record;
         currentRecord = null;
         if (null != reader) {
-            record = reader.nextRecord(true);
+            record = reader.nextRecord();
             if (null != record) {
                 currentRecord = record;
                 readPos = record.getPositionWithinLogSegment();

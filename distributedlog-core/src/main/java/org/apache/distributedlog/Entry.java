@@ -244,10 +244,9 @@ public class Entry {
          * to true. If the log record is used internally, the caller can set the {@code allocateBuffer}
          * to false.
          *
-         * @param allocateBuffer whether to allocate new buffer for the returned log record.
          * @return next log record from this record set.
          */
-        LogRecordWithDLSN nextRecord(boolean allocateBuffer)
+        LogRecordWithDLSN nextRecord()
                 throws IOException;
 
         /**

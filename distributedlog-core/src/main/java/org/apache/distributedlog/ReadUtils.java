@@ -315,10 +315,10 @@ public class ReadUtils {
             Entry.Reader entry,
             ScanContext context,
             LogRecordSelector selector) throws IOException {
-        LogRecordWithDLSN nextRecord = entry.nextRecord(false);
+        LogRecordWithDLSN nextRecord = entry.nextRecord();
         while (nextRecord != null) {
             LogRecordWithDLSN record = nextRecord;
-            nextRecord = entry.nextRecord(false);
+            nextRecord = entry.nextRecord();
             context.numRecordsScanned.incrementAndGet();
             if (!context.includeControl && record.isControl()) {
                 continue;

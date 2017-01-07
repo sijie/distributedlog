@@ -173,7 +173,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 done = true;
                 continue;
             }
-            LogRecordWithDLSN record = entryReader.nextRecord(false);
+            LogRecordWithDLSN record = entryReader.nextRecord();
             while (null != record) {
                 if (!record.isControl()) {
                     DLMTestUtil.verifyLogRecord(record);
@@ -183,7 +183,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 DLSN dlsn = record.getDlsn();
                 assertEquals(1L, dlsn.getLogSegmentSequenceNo());
                 assertEquals(entryId, dlsn.getEntryId());
-                record = entryReader.nextRecord(false);
+                record = entryReader.nextRecord();
             }
             entryReader.release();
             ++entryId;
@@ -255,7 +255,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertFalse(reader.hasCaughtUpOnInprogress());
         // read first entry
         Entry.Reader entryReader = FutureUtils.result(reader.readNext(1)).get(0);
-        LogRecordWithDLSN record = entryReader.nextRecord(false);
+        LogRecordWithDLSN record = entryReader.nextRecord();
         while (null != record) {
             if (!record.isControl()) {
                 DLMTestUtil.verifyLogRecord(record);
@@ -265,7 +265,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
             DLSN dlsn = record.getDlsn();
             assertEquals(1L, dlsn.getLogSegmentSequenceNo());
             assertEquals(entryId, dlsn.getEntryId());
-            record = entryReader.nextRecord(false);
+            record = entryReader.nextRecord();
         }
         entryReader.release();
         ++entryId;
@@ -312,7 +312,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertEquals(5, reader.getNextEntryId());
         // read first entry
         Entry.Reader entryReader = FutureUtils.result(reader.readNext(1)).get(0);
-        LogRecordWithDLSN record = entryReader.nextRecord(false);
+        LogRecordWithDLSN record = entryReader.nextRecord();
         while (null != record) {
             if (!record.isControl()) {
                 DLMTestUtil.verifyLogRecord(record);
@@ -322,7 +322,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
             DLSN dlsn = record.getDlsn();
             assertEquals(1L, dlsn.getLogSegmentSequenceNo());
             assertEquals(entryId, dlsn.getEntryId());
-            record = entryReader.nextRecord(false);
+            record = entryReader.nextRecord();
         }
         entryReader.release();
         ++entryId;
@@ -369,7 +369,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertEquals((reader.getLastAddConfirmed() + 1), reader.getNextEntryId());
         // read first entry
         Entry.Reader entryReader = FutureUtils.result(reader.readNext(1)).get(0);
-        LogRecordWithDLSN record = entryReader.nextRecord(false);
+        LogRecordWithDLSN record = entryReader.nextRecord();
         while (null != record) {
             if (!record.isControl()) {
                 DLMTestUtil.verifyLogRecord(record);
@@ -379,7 +379,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
             DLSN dlsn = record.getDlsn();
             assertEquals(1L, dlsn.getLogSegmentSequenceNo());
             assertEquals(entryId, dlsn.getEntryId());
-            record = entryReader.nextRecord(false);
+            record = entryReader.nextRecord();
         }
         entryReader.release();
         ++entryId;
@@ -420,7 +420,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         long entryId = 0L;
         while (true) {
             Entry.Reader entryReader = FutureUtils.result(reader.readNext(1)).get(0);
-            LogRecordWithDLSN record = entryReader.nextRecord(false);
+            LogRecordWithDLSN record = entryReader.nextRecord();
             while (null != record) {
                 if (!record.isControl()) {
                     DLMTestUtil.verifyLogRecord(record);
@@ -430,7 +430,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 DLSN dlsn = record.getDlsn();
                 assertEquals(1L, dlsn.getLogSegmentSequenceNo());
                 assertEquals(entryId, dlsn.getEntryId());
-                record = entryReader.nextRecord(false);
+                record = entryReader.nextRecord();
             }
             entryReader.release();
             ++entryId;
@@ -448,10 +448,10 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         assertEquals(1, nextReadEntries.size());
         assertTrue(reader.hasCaughtUpOnInprogress());
         Entry.Reader entryReader = nextReadEntries.get(0);
-        LogRecordWithDLSN record = entryReader.nextRecord(false);
+        LogRecordWithDLSN record = entryReader.nextRecord();
         assertNotNull(record);
         assertTrue(record.isControl());
-        assertNull(entryReader.nextRecord(false));
+        assertNull(entryReader.nextRecord());
         entryReader.release();
         // once the read is advanced, we will prefetch next record
         while (reader.getNextEntryId() <= entryId) {
@@ -493,7 +493,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         long entryId = 0L;
         while (true) {
             Entry.Reader entryReader = FutureUtils.result(reader.readNext(1)).get(0);
-            LogRecordWithDLSN record = entryReader.nextRecord(false);
+            LogRecordWithDLSN record = entryReader.nextRecord();
             while (null != record) {
                 if (!record.isControl()) {
                     DLMTestUtil.verifyLogRecord(record);
@@ -503,7 +503,7 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
                 DLSN dlsn = record.getDlsn();
                 assertEquals(1L, dlsn.getLogSegmentSequenceNo());
                 assertEquals(entryId, dlsn.getEntryId());
-                record = entryReader.nextRecord(false);
+                record = entryReader.nextRecord();
             }
             entryReader.release();
             ++entryId;
@@ -520,10 +520,10 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         List<Entry.Reader> nextReadEntries = FutureUtils.result(nextReadFuture);
         assertEquals(1, nextReadEntries.size());
         Entry.Reader entryReader = nextReadEntries.get(0);
-        LogRecordWithDLSN record = entryReader.nextRecord(false);
+        LogRecordWithDLSN record = entryReader.nextRecord();
         assertNotNull(record);
         assertTrue(record.isControl());
-        assertNull(entryReader.nextRecord(false));
+        assertNull(entryReader.nextRecord());
         entryReader.release();
         // once the read is advanced, we will prefetch next record
         while (reader.getNextEntryId() <= entryId) {
@@ -537,10 +537,10 @@ public class TestBKLogSegmentEntryReader extends TestDistributedLogBase {
         // close the writer, the write will be committed
         Utils.close(writer);
         entryReader = FutureUtils.result(reader.readNext(1)).get(0);
-        record = entryReader.nextRecord(false);
+        record = entryReader.nextRecord();
         assertNotNull(record);
         assertFalse(record.isControl());
-        assertNull(entryReader.nextRecord(false));
+        assertNull(entryReader.nextRecord());
         entryReader.release();
         while (reader.getNextEntryId() <= entryId + 1) {
             TimeUnit.MILLISECONDS.sleep(10);

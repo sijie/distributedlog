@@ -43,7 +43,6 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
     private final long parentMetadata;
     private int numRecords;
     private final ByteBuf reader;
-    private final boolean allocateBuffer;
 
     // slot id
     private long slotId;
@@ -56,8 +55,7 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
                              int startPositionWithinLogSegment,
                              long startSequenceId,
                              long parentMetadata,
-                             ByteBuf in,
-                             boolean allocateBuffer)
+                             ByteBuf in)
             throws IOException {
         this.logSegmentSeqNo = logSegmentSeqNo;
         this.entryId = entryId;
@@ -66,7 +64,6 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
         this.position = startPositionWithinLogSegment;
         this.startSequenceId = startSequenceId;
         this.parentMetadata = parentMetadata;
-        this.allocateBuffer = allocateBuffer;
 
         // read data
         try {
@@ -108,7 +105,7 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted 
 
         DLSN dlsn = new DLSN(logSegmentSeqNo, entryId, slotId);
 
-        ByteBuffer payload = LogRecord.Reader.readPayload(reader, allocateBuffer);
+        ByteBuffer payload = LogRecord.Reader.readPayload(reader);
 
         long metadata = LogRecord.setPositionWithinLogSegment(parentMetadata, position);
         LogRecordWithDLSN record = new LogRecordWithDLSN(
