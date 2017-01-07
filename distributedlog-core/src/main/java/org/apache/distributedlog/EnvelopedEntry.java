@@ -17,23 +17,23 @@
  */
 package org.apache.distributedlog;
 
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-
-import com.google.common.base.Preconditions;
-
-import org.apache.distributedlog.exceptions.InvalidEnvelopedEntryException;
 import org.apache.bookkeeper.stats.Counter;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
-
 import org.apache.distributedlog.annotations.DistributedLogAnnotations.Compression;
+import org.apache.distributedlog.exceptions.InvalidEnvelopedEntryException;
 import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.io.CompressionUtils;
 import org.apache.distributedlog.util.BitMaskUtils;
+import org.apache.distributedlog.util.ReferenceCounted;
 
 /**
  * An enveloped entry written to BookKeeper.
@@ -67,7 +67,7 @@ import org.apache.distributedlog.util.BitMaskUtils;
  *      10      : Unused
  *      11      : Unused
  */
-public class EnvelopedEntry {
+public class EnvelopedEntry implements ReferenceCounted {
 
     public static final int VERSION_LENGTH = 1; // One byte long
     public static final byte VERSION_ONE = 1;
@@ -75,6 +75,10 @@ public class EnvelopedEntry {
     public static final byte LOWEST_SUPPORTED_VERSION = VERSION_ONE;
     public static final byte HIGHEST_SUPPORTED_VERSION = VERSION_ONE;
     public static final byte CURRENT_VERSION = VERSION_ONE;
+
+    public static final int HEADER_LEN = 2 * (Integer.SIZE / Byte.SIZE);
+    public static final int PAYLOAD_OFFSET = VERSION_LENGTH + HEADER_LEN;
+    public static final int PAYLOAD_LEN_OFFSET = VERSION_LENGTH + (Integer.SIZE / Byte.SIZE);
 
     private final OpStatsLogger compressionStat;
     private final OpStatsLogger decompressionStat;
@@ -88,7 +92,7 @@ public class EnvelopedEntry {
 
     public EnvelopedEntry(byte version,
                           StatsLogger statsLogger) throws InvalidEnvelopedEntryException {
-        Preconditions.checkNotNull(statsLogger);
+        checkNotNull(statsLogger);
         if (version < LOWEST_SUPPORTED_VERSION || version > HIGHEST_SUPPORTED_VERSION) {
             throw new InvalidEnvelopedEntryException("Invalid enveloped entry version " + version + ", expected to be in [ "
                     + LOWEST_SUPPORTED_VERSION + " ~ " + HIGHEST_SUPPORTED_VERSION + " ]");
@@ -117,9 +121,9 @@ public class EnvelopedEntry {
                           StatsLogger statsLogger)
             throws InvalidEnvelopedEntryException {
         this(version, statsLogger);
-        Preconditions.checkNotNull(compressionType);
-        Preconditions.checkNotNull(decompressed);
-        Preconditions.checkArgument(length >= 0, "Invalid bytes length " + length);
+        checkNotNull(compressionType);
+        checkNotNull(decompressed);
+        checkArgument(length >= 0, "Invalid bytes length " + length);
 
         this.header = new Header(compressionType, length);
         this.payloadDecompressed = new Payload(length, decompressed);
@@ -131,7 +135,7 @@ public class EnvelopedEntry {
 
     @Compression
     public void writeFully(DataOutputStream out) throws IOException {
-        Preconditions.checkNotNull(out);
+        checkNotNull(out);
         if (!isReady()) {
             throw new IOException("Entry not writable");
         }
@@ -154,7 +158,7 @@ public class EnvelopedEntry {
 
     @Compression
     public void readFully(DataInputStream in) throws IOException {
-        Preconditions.checkNotNull(in);
+        checkNotNull(in);
         // Make sure we're reading the right versioned entry.
         byte version = in.readByte();
         if (version != this.version) {
@@ -192,6 +196,24 @@ public class EnvelopedEntry {
         private int decompressedSize = 0;
         private CompressionCodec.Type compressionType = CompressionCodec.Type.UNKNOWN;
 
+        public static int getFlag(CompressionCodec.Type compressionType) {
+            int flags = 0;
+            switch (compressionType) {
+                case NONE:
+                    flags = (int) BitMaskUtils.set(flags, COMPRESSION_CODEC_MASK,
+                            COMPRESSION_CODEC_NONE);
+                    break;
+                case LZ4:
+                    flags = (int) BitMaskUtils.set(flags, COMPRESSION_CODEC_MASK,
+                            COMPRESSION_CODEC_LZ4);
+                    break;
+                default:
+                    throw new RuntimeException(String.format("Unknown Compression Type: %s",
+                                                             compressionType));
+            }
+            return flags;
+        }
+
         // Whether this struct is ready for reading/writing.
         private boolean ready = false;
 
@@ -204,24 +226,12 @@ public class EnvelopedEntry {
             this.compressionType = compressionType;
             this.decompressedSize = decompressedSize;
             this.flags = 0;
-            switch (compressionType) {
-                case NONE:
-                    this.flags = (int) BitMaskUtils.set(flags, COMPRESSION_CODEC_MASK,
-                                                        COMPRESSION_CODEC_NONE);
-                    break;
-                case LZ4:
-                    this.flags = (int) BitMaskUtils.set(flags, COMPRESSION_CODEC_MASK,
-                                                        COMPRESSION_CODEC_LZ4);
-                    break;
-                default:
-                    throw new RuntimeException(String.format("Unknown Compression Type: %s",
-                                                             compressionType));
-            }
+
             // This can now be written.
             this.ready = true;
         }
 
-        private void write(DataOutputStream out) throws IOException {
+        private void write(ByteBuf ) throws IOException {
             out.writeInt(flags);
             out.writeInt(decompressedSize);
         }

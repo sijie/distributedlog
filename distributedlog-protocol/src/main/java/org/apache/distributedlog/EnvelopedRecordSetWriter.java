@@ -25,33 +25,29 @@ import static org.apache.distributedlog.LogRecordSet.METADATA_COMPRESSION_MASK;
 import static org.apache.distributedlog.LogRecordSet.METADATA_VERSION_MASK;
 import static org.apache.distributedlog.LogRecordSet.NULL_OP_STATS_LOGGER;
 import static org.apache.distributedlog.LogRecordSet.VERSION;
+import static org.apache.distributedlog.buffer.BufferPool.ALLOCATOR;
 
-import org.apache.distributedlog.exceptions.LogRecordTooLongException;
-import org.apache.distributedlog.exceptions.WriteException;
-import org.apache.distributedlog.io.Buffer;
-import org.apache.distributedlog.io.CompressionCodec;
-import org.apache.distributedlog.io.CompressionUtils;
 import com.twitter.util.Promise;
-import java.io.DataOutputStream;
-import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.Channels;
-import java.nio.channels.WritableByteChannel;
 import java.util.LinkedList;
 import java.util.List;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import org.apache.distributedlog.exceptions.LogRecordTooLongException;
+import org.apache.distributedlog.io.CompressionCodec;
+import org.apache.distributedlog.io.CompressionUtils;
+import org.apache.distributedlog.util.ReferenceCounted;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * {@link Buffer} based log record set writer.
+ * {@link ByteBuf} based log record set writer.
  */
-class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
+class EnvelopedRecordSetWriter implements LogRecordSet.Writer, ReferenceCounted {
 
     private static final Logger logger = LoggerFactory.getLogger(EnvelopedRecordSetWriter.class);
 
-    private final Buffer buffer;
-    private final DataOutputStream writer;
-    private final WritableByteChannel writeChannel;
+    private ByteBuf buffer;
     private final List<Promise<DLSN>> promiseList;
     private final CompressionCodec.Type codec;
     private final int codecCode;
@@ -60,7 +56,7 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
 
     EnvelopedRecordSetWriter(int initialBufferSize,
                              CompressionCodec.Type codec) {
-        this.buffer = new Buffer(Math.max(initialBufferSize, HEADER_LEN));
+        this.buffer = ALLOCATOR.buffer(Math.max(initialBufferSize, HEADER_LEN));
         this.promiseList = new LinkedList<Promise<DLSN>>();
         this.codec = codec;
         switch (codec) {
@@ -71,17 +67,11 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
                 this.codecCode = COMPRESSION_CODEC_NONE;
                 break;
         }
-        this.writer = new DataOutputStream(buffer);
-        try {
-            this.writer.writeInt((VERSION & METADATA_VERSION_MASK)
-                    | (codecCode & METADATA_COMPRESSION_MASK));
-            this.writer.writeInt(0); // count
-            this.writer.writeInt(0); // original len
-            this.writer.writeInt(0); // actual len
-        } catch (IOException e) {
-            logger.warn("Failed to serialize the header to an enveloped record set", e);
-        }
-        this.writeChannel = Channels.newChannel(writer);
+        this.buffer.writeInt((VERSION & METADATA_VERSION_MASK)
+                | (codecCode & METADATA_COMPRESSION_MASK));
+        this.buffer.writeInt(0); // count
+        this.buffer.writeInt(0); // original len
+        this.buffer.writeInt(0); // actual len
     }
 
     synchronized List<Promise<DLSN>> getPromiseList() {
@@ -91,22 +81,17 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
     @Override
     public synchronized void writeRecord(ByteBuffer record,
                                          Promise<DLSN> transmitPromise)
-            throws LogRecordTooLongException, WriteException {
+            throws LogRecordTooLongException {
         int logRecordSize = record.remaining();
         if (logRecordSize > MAX_LOGRECORD_SIZE) {
             throw new LogRecordTooLongException(
                     "Log Record of size " + logRecordSize + " written when only "
                             + MAX_LOGRECORD_SIZE + " is allowed");
         }
-        try {
-            writer.writeInt(record.remaining());
-            writeChannel.write(record);
-            ++count;
-            promiseList.add(transmitPromise);
-        } catch (IOException e) {
-            logger.error("Failed to append record to record set", e);
-            throw new WriteException("", "Failed to append record to record set");
-        }
+        buffer.writeInt(record.remaining());
+        buffer.writeBytes(record);
+        ++count;
+        promiseList.add(transmitPromise);
     }
 
     private synchronized void satisfyPromises(long lssn, long entryId, long startSlotId) {
@@ -127,7 +112,7 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
 
     @Override
     public int getNumBytes() {
-        return buffer.size();
+        return buffer.readableBytes();
     }
 
     @Override
@@ -143,13 +128,20 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
         return recordSetBuffer.duplicate();
     }
 
-    ByteBuffer createBuffer() {
-        byte[] data = buffer.getData();
-        int dataOffset = HEADER_LEN;
-        int dataLen = buffer.size() - HEADER_LEN;
+    @Override
+    public void retain() {
+        buffer.retain();
+    }
 
+    @Override
+    public void release() {
+        buffer.release();
+    }
+
+    ByteBuffer createBuffer() {
+        int dataLen = buffer.readableBytes() - HEADER_LEN;
         if (COMPRESSION_CODEC_LZ4 != codecCode) {
-            ByteBuffer recordSetBuffer = ByteBuffer.wrap(data, 0, buffer.size());
+            ByteBuffer recordSetBuffer = buffer.nioBuffer();
             // update count
             recordSetBuffer.putInt(4, count);
             // update data len
@@ -158,30 +150,33 @@ class EnvelopedRecordSetWriter implements LogRecordSet.Writer {
             return recordSetBuffer;
         }
 
-        // compression
+        int dataOffset = HEADER_LEN;
 
+        // compression
+        ByteBuf uncompressedBuf = buffer.slice(dataOffset, dataLen);
         CompressionCodec compressor =
                     CompressionUtils.getCompressionCodec(codec);
-        byte[] compressed =
-                compressor.compress(data, dataOffset, dataLen, NULL_OP_STATS_LOGGER);
+        ByteBuf compressedBuf =
+                compressor.compress(uncompressedBuf, NULL_OP_STATS_LOGGER);
+        int compressedLen = compressedBuf.readableBytes();
 
         ByteBuffer recordSetBuffer;
-        if (compressed.length > dataLen) {
-            byte[] newData = new byte[HEADER_LEN + compressed.length];
-            System.arraycopy(data, 0, newData, 0, HEADER_LEN + dataLen);
-            recordSetBuffer = ByteBuffer.wrap(newData);
+        buffer.setIndex(0, HEADER_LEN);
+        if (compressedLen + HEADER_LEN > buffer.capacity()) {
+            buffer = Unpooled.compositeBuffer(2)
+                    .addComponent(buffer)
+                    .addComponent(compressedBuf)
+                    .setIndex(0, compressedLen + HEADER_LEN);
         } else {
-            recordSetBuffer = ByteBuffer.wrap(data);
+            buffer.writeBytes(compressedBuf);
         }
         // version
-        recordSetBuffer.position(4);
+        recordSetBuffer = buffer.nioBuffer();
         // update count
-        recordSetBuffer.putInt(count);
+        recordSetBuffer.putInt(4, count);
         // update data len
-        recordSetBuffer.putInt(dataLen);
-        recordSetBuffer.putInt(compressed.length);
-        recordSetBuffer.put(compressed);
-        recordSetBuffer.flip();
+        recordSetBuffer.putInt(8, dataLen);
+        recordSetBuffer.putInt(12, compressedLen);
         return recordSetBuffer;
     }
 

@@ -17,10 +17,10 @@
  */
 package org.apache.distributedlog.io;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 
-import java.util.Arrays;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 
 /**
@@ -28,23 +28,14 @@ import org.apache.bookkeeper.stats.OpStatsLogger;
  */
 public class IdentityCompressionCodec implements CompressionCodec {
     @Override
-    public byte[] compress(byte[] data, int offset, int length, OpStatsLogger compressionStat) {
+    public ByteBuf compress(ByteBuf data, OpStatsLogger compressionStat) {
         checkNotNull(data);
-        checkArgument(length >= 0);
-        return Arrays.copyOfRange(data, offset, offset + length);
+        return Unpooled.wrappedBuffer(data);
     }
 
     @Override
-    public byte[] decompress(byte[] data, int offset, int length, OpStatsLogger decompressionStat) {
+    public ByteBuf decompress(ByteBuf data, int decompressedSize, OpStatsLogger decompressionStat) {
         checkNotNull(data);
-        return Arrays.copyOfRange(data, offset, offset + length);
-    }
-
-    @Override
-    // Decompressed size is the same as the length of the data because this is an
-    // Identity compressor
-    public byte[] decompress(byte[] data, int offset, int length,
-                             int decompressedSize, OpStatsLogger decompressionStat) {
-        return decompress(data, offset, length, decompressionStat);
+        return Unpooled.wrappedBuffer(data);
     }
 }

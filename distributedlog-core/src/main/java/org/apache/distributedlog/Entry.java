@@ -54,13 +54,11 @@ public class Entry {
     public static Writer newEntry(
             String logName,
             int initialBufferSize,
-            boolean envelopeBeforeTransmit,
             CompressionCodec.Type codec,
             StatsLogger statsLogger) {
         return new EnvelopedEntryWriter(
                 logName,
                 initialBufferSize,
-                envelopeBeforeTransmit,
                 codec,
                 statsLogger);
     }
@@ -273,7 +271,6 @@ public class Entry {
     private Entry(long logSegmentSequenceNumber,
                   long entryId,
                   long startSequenceId,
-                  boolean envelopedEntry,
                   boolean deserializeRecordSet,
                   byte[] data,
                   int offset,
@@ -344,11 +341,6 @@ public class Entry {
          */
         void writeRecord(LogRecord record, Promise<DLSN> transmitPromise)
                 throws LogRecordTooLongException, WriteException;
-
-        /**
-         * Reset the writer to write records.
-         */
-        void reset();
 
     }
 

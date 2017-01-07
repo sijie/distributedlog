@@ -19,14 +19,14 @@ package org.apache.distributedlog.io;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.distributedlog.buffer.BufferPool.ALLOCATOR;
 
 import com.google.common.base.Stopwatch;
 import java.util.concurrent.TimeUnit;
+import io.netty.buffer.ByteBuf;
 import net.jpountz.lz4.LZ4Compressor;
-import net.jpountz.lz4.LZ4Exception;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
-import net.jpountz.lz4.LZ4SafeDecompressor;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 
 /**
@@ -39,63 +39,99 @@ public class LZ4CompressionCodec implements CompressionCodec {
     // Used for compression
     private final LZ4Compressor compressor;
     // Used to decompress when the size of the output is known
-    private final LZ4FastDecompressor fastDecompressor;
-    // Used to decompress when the size of the output is not known
-    private final LZ4SafeDecompressor safeDecompressor;
+    private final LZ4FastDecompressor decompressor;
 
     public LZ4CompressionCodec() {
         this.compressor = LZ4Factory.fastestInstance().fastCompressor();
-        this.fastDecompressor = LZ4Factory.fastestInstance().fastDecompressor();
-        this.safeDecompressor = LZ4Factory.fastestInstance().safeDecompressor();
+        this.decompressor = LZ4Factory.fastestInstance().fastDecompressor();
     }
 
     @Override
-    public byte[] compress(byte[] data, int offset, int length, OpStatsLogger compressionStat) {
-        checkNotNull(data);
-        checkArgument(offset >= 0 && offset < data.length);
-        checkArgument(length >= 0);
+    public ByteBuf compress(ByteBuf decompressedBuf, OpStatsLogger compressionStat) {
+        checkNotNull(decompressedBuf);
         checkNotNull(compressionStat);
 
         Stopwatch watch = Stopwatch.createStarted();
-        byte[] compressed = compressor.compress(data, offset, length);
-        compressionStat.registerSuccessfulEvent(watch.elapsed(TimeUnit.MICROSECONDS));
-        return compressed;
-    }
 
-    @Override
-    public byte[] decompress(byte[] data, int offset, int length, OpStatsLogger decompressionStat) {
-        checkNotNull(data);
-        checkArgument(offset >= 0 && offset < data.length);
-        checkArgument(length >= 0);
-        checkNotNull(decompressionStat);
+        ByteBuf tempBuf = null;
+        byte[] decompressedArray;
+        int decompressedArrayOffset;
+        int decompressedArrayLength = decompressedBuf.readableBytes();
+        try {
+            ByteBuf buf;
+            if (decompressedBuf.hasArray()) {
+                buf = decompressedBuf;
+            } else {
+                tempBuf = ALLOCATOR.heapBuffer(decompressedArrayLength);
+                decompressedBuf.readBytes(tempBuf);
+                buf = tempBuf;
+            }
+            decompressedArray = buf.array();
+            decompressedArrayOffset = buf.arrayOffset() + buf.readerIndex();
 
-        Stopwatch watch = Stopwatch.createStarted();
-        // Assume that we have a compression ratio of 1/3.
-        int outLength = length * 3;
-        while (true) {
-            try {
-                byte[] decompressed = safeDecompressor.decompress(data, offset, length, outLength);
-                decompressionStat.registerSuccessfulEvent(watch.elapsed(TimeUnit.MICROSECONDS));
-                return decompressed;
-            } catch (LZ4Exception e) {
-                outLength *= 2;
+            // Allocate the dest
+            int maxCompressedLength = compressor.maxCompressedLength(decompressedArrayLength);
+            ByteBuf compressedBuf = ALLOCATOR.heapBuffer(maxCompressedLength);
+            byte[] compressedArray = compressedBuf.array();
+            int compressedArrayOffset =
+                    compressedBuf.arrayOffset() + compressedBuf.readerIndex();
+            int compressedLength = compressor.compress(
+                    decompressedArray, decompressedArrayOffset, decompressedArrayLength,
+                    compressedArray, compressedArrayOffset);
+            compressedBuf.setIndex(
+                    compressedBuf.readerIndex(),
+                    compressedBuf.readerIndex() + compressedLength);
+            return compressedBuf;
+        } finally {
+            compressionStat.registerSuccessfulEvent(watch.elapsed(TimeUnit.MICROSECONDS));
+            if (null != tempBuf) {
+                tempBuf.release();
             }
         }
     }
 
     @Override
     // length parameter is ignored here because of the way the fastDecompressor works.
-    public byte[] decompress(byte[] data, int offset, int length, int decompressedSize,
-                             OpStatsLogger decompressionStat) {
-        checkNotNull(data);
-        checkArgument(offset >= 0 && offset < data.length);
-        checkArgument(length >= 0);
+    public ByteBuf decompress(ByteBuf compressedBuf,
+                              int decompressedSize,
+                              OpStatsLogger decompressionStat) {
+        checkNotNull(compressedBuf);
         checkArgument(decompressedSize >= 0);
         checkNotNull(decompressionStat);
 
         Stopwatch watch = Stopwatch.createStarted();
-        byte[] decompressed = fastDecompressor.decompress(data, offset, decompressedSize);
-        decompressionStat.registerSuccessfulEvent(watch.elapsed(TimeUnit.MICROSECONDS));
-        return decompressed;
+
+        ByteBuf tempBuf = null;
+        byte[] compressedArray;
+        int compressedArrayOffset;
+        int compressedArrayLength = compressedBuf.readableBytes();
+        try {
+            ByteBuf buf;
+            if (compressedBuf.hasArray()) {
+                buf = compressedBuf;
+            } else {
+                tempBuf = ALLOCATOR.heapBuffer(compressedArrayLength);
+                compressedBuf.readBytes(tempBuf);
+                buf = tempBuf;
+            }
+            compressedArray = buf.array();
+            compressedArrayOffset = buf.arrayOffset() + buf.readerIndex();
+
+            // Allocate the dest
+            ByteBuf decompressedBuf = ALLOCATOR.heapBuffer(decompressedSize);
+            byte[] decompressedArray = decompressedBuf.array();
+            int decompressedArrayOffset =
+                    decompressedBuf.arrayOffset() + decompressedBuf.readerIndex();
+            decompressor.decompress(
+                    compressedArray, compressedArrayOffset,
+                    decompressedArray, decompressedArrayOffset, decompressedSize);
+            decompressedBuf.setIndex(0, decompressedSize);
+            return decompressedBuf;
+        } finally {
+            decompressionStat.registerSuccessfulEvent(watch.elapsed(TimeUnit.MICROSECONDS));
+            if (null != tempBuf) {
+                tempBuf.release();
+            }
+        }
     }
 }

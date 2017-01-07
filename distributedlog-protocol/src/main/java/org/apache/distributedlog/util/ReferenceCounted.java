@@ -15,19 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.distributedlog.io;
-
-import java.io.ByteArrayOutputStream;
+package org.apache.distributedlog.util;
 
 /**
- * {@link ByteArrayOutputStream} based buffer.
+ * An interface for indicating an object is reference counted.
  */
-public class Buffer extends ByteArrayOutputStream {
-    public Buffer(int initialCapacity) {
-        super(initialCapacity);
-    }
+public interface ReferenceCounted {
 
-    public byte[] getData() {
-        return buf;
-    }
+    void retain();
+
+    void release();
+
 }

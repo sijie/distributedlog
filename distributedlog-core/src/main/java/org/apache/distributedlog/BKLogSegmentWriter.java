@@ -41,7 +41,6 @@ import org.apache.distributedlog.exceptions.InvalidEnvelopedEntryException;
 import org.apache.distributedlog.feature.CoreFeatureKeys;
 import org.apache.distributedlog.injector.FailureInjector;
 import org.apache.distributedlog.injector.RandomDelayFailureInjector;
-import org.apache.distributedlog.io.Buffer;
 import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.io.CompressionUtils;
 import org.apache.distributedlog.lock.DistributedLock;
@@ -292,7 +291,6 @@ class BKLogSegmentWriter implements LogSegmentWriter, AddCallback, Runnable, Siz
         this.recordSetWriter = Entry.newEntry(
                 streamName,
                 Math.max(transmissionThreshold, 1024),
-                envelopeBeforeTransmit(),
                 compressionType,
                 envelopeStatsLogger);
         this.packetPrevious = null;
@@ -461,7 +459,6 @@ class BKLogSegmentWriter implements LogSegmentWriter, AddCallback, Runnable, Siz
         return Entry.newEntry(
                 streamName,
                 Math.max(transmissionThreshold, getAverageTransmitSize()),
-                envelopeBeforeTransmit(),
                 compressionType,
                 envelopeStatsLogger);
     }

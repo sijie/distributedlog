@@ -17,29 +17,31 @@
  */
 package org.apache.distributedlog;
 
-import org.apache.distributedlog.Entry.Writer;
-import org.apache.distributedlog.exceptions.InvalidEnvelopedEntryException;
-import org.apache.distributedlog.exceptions.LogRecordTooLongException;
-import org.apache.distributedlog.exceptions.WriteCancelledException;
-import org.apache.distributedlog.exceptions.WriteException;
-import org.apache.distributedlog.io.Buffer;
-import org.apache.distributedlog.io.CompressionCodec;
-import com.twitter.util.Promise;
-import org.apache.bookkeeper.stats.StatsLogger;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import static org.apache.distributedlog.LogRecord.MAX_LOGRECORD_SIZE;
+import static org.apache.distributedlog.buffer.BufferPool.ALLOCATOR;
 
-import java.io.DataOutputStream;
+import com.twitter.util.Promise;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 
-import static org.apache.distributedlog.LogRecord.MAX_LOGRECORD_SIZE;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import org.apache.distributedlog.Entry.Writer;
+import org.apache.distributedlog.exceptions.InvalidEnvelopedEntryException;
+import org.apache.distributedlog.exceptions.LogRecordTooLongException;
+import org.apache.distributedlog.exceptions.WriteException;
+import org.apache.distributedlog.io.CompressionCodec;
+import org.apache.bookkeeper.stats.StatsLogger;
+import org.apache.distributedlog.io.CompressionUtils;
+import org.apache.distributedlog.util.ReferenceCounted;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * {@link org.apache.distributedlog.io.Buffer} based log record set writer.
+ * {@link ByteBuf} based log record set writer.
  */
-class EnvelopedEntryWriter implements Writer {
+class EnvelopedEntryWriter implements Writer, ReferenceCounted {
 
     static final Logger logger = LoggerFactory.getLogger(EnvelopedEntryWriter.class);
 
@@ -56,10 +58,10 @@ class EnvelopedEntryWriter implements Writer {
     }
 
     private final String logName;
-    private final Buffer buffer;
+    private ByteBuf buffer;
     private final LogRecord.Writer writer;
+    private final ByteBufOutputStream out;
     private final List<WriteRequest> writeRequests;
-    private final boolean envelopeBeforeTransmit;
     private final CompressionCodec.Type codec;
     private final StatsLogger statsLogger;
     private int count = 0;
@@ -68,23 +70,21 @@ class EnvelopedEntryWriter implements Writer {
 
     EnvelopedEntryWriter(String logName,
                          int initialBufferSize,
-                         boolean envelopeBeforeTransmit,
                          CompressionCodec.Type codec,
                          StatsLogger statsLogger) {
         this.logName = logName;
-        this.buffer = new Buffer(initialBufferSize * 6 / 5);
-        this.writer = new LogRecord.Writer(new DataOutputStream(buffer));
+        this.buffer = ALLOCATOR.buffer(initialBufferSize, initialBufferSize * 6 / 5);
+        this.out = new ByteBufOutputStream(buffer);
+        this.writer = new LogRecord.Writer(out);
         this.writeRequests = new LinkedList<WriteRequest>();
-        this.envelopeBeforeTransmit = envelopeBeforeTransmit;
         this.codec = codec;
         this.statsLogger = statsLogger;
-    }
-
-    @Override
-    public synchronized void reset() {
-        cancelPromises(new WriteCancelledException(logName, "Record Set is reset"));
-        count = 0;
-        this.buffer.reset();
+        // write the version
+        this.buffer.writeByte(EnvelopedEntry.CURRENT_VERSION);
+        // flags
+        this.buffer.writeInt(EnvelopedEntry.Header.getFlag(codec));
+        // original length
+        this.buffer.writeInt(0);
     }
 
     @Override
@@ -146,7 +146,7 @@ class EnvelopedEntryWriter implements Writer {
 
     @Override
     public int getNumBytes() {
-        return buffer.size();
+        return writer.getPendingBytes() - EnvelopedEntry.PAYLOAD_OFFSET;
     }
 
     @Override
@@ -155,24 +155,47 @@ class EnvelopedEntryWriter implements Writer {
     }
 
     @Override
-    public synchronized Buffer getBuffer() throws InvalidEnvelopedEntryException, IOException {
-        if (!envelopeBeforeTransmit) {
-            return buffer;
-        }
+    public synchronized ByteBuf getBuffer() throws InvalidEnvelopedEntryException, IOException {
         // We can't escape this allocation because things need to be read from one byte array
         // and then written to another. This is the destination.
-        Buffer toSend = new Buffer(buffer.size());
-        byte[] decompressed = buffer.getData();
-        int length = buffer.size();
-        EnvelopedEntry entry = new EnvelopedEntry(EnvelopedEntry.CURRENT_VERSION,
-                                                  codec,
-                                                  decompressed,
-                                                  length,
-                                                  statsLogger);
-        // This will cause an allocation of a byte[] for compression. This can be avoided
-        // but we can do that later only if needed.
-        entry.writeFully(new DataOutputStream(toSend));
-        return toSend;
+        int length = getNumBytes();
+
+        if (CompressionCodec.Type.NONE == codec) {
+            buffer.markWriterIndex();
+            buffer.setIndex(0, EnvelopedEntry.PAYLOAD_LEN_OFFSET);
+            buffer.writeInt(length);
+            buffer.resetWriterIndex();
+            return buffer;
+        }
+
+        CompressionCodec compressor = CompressionUtils.getCompressionCodec(codec);
+        // compress the data
+        buffer.setIndex(EnvelopedEntry.PAYLOAD_LEN_OFFSET, buffer.writerIndex());
+        ByteBuf compressedBuf = compressor.compress(buffer, statsLogger.getOpStatsLogger("compression_time"));
+        int compressedDataLen = compressedBuf.readableBytes();
+        // reset the index for the buffer
+        buffer.setIndex(0, EnvelopedEntry.PAYLOAD_LEN_OFFSET);
+        buffer.writeInt(compressedDataLen);
+        buffer = Unpooled.compositeBuffer(2)
+                .addComponent(buffer)
+                .addComponent(compressedBuf)
+                .setIndex(0, EnvelopedEntry.PAYLOAD_OFFSET + compressedDataLen);
+
+        return buffer;
+    }
+
+    @Override
+    public void retain() {
+        if (null != buffer) {
+            buffer.retain();
+        }
+    }
+
+    @Override
+    public void release() {
+        if (null != buffer) {
+            buffer.release();
+        }
     }
 
     @Override

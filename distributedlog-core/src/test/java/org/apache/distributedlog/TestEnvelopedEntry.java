@@ -21,7 +21,6 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 
-import org.apache.distributedlog.io.Buffer;
 import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.junit.Assert;

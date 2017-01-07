@@ -23,25 +23,23 @@ import static org.apache.distributedlog.LogRecordSet.METADATA_VERSION_MASK;
 import static org.apache.distributedlog.LogRecordSet.NULL_OP_STATS_LOGGER;
 import static org.apache.distributedlog.LogRecordSet.VERSION;
 
+import io.netty.buffer.ByteBuf;
+import java.io.IOException;
 import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.io.CompressionUtils;
-import java.io.DataInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.ByteBuffer;
-
+import org.apache.distributedlog.util.ReferenceCounted;
 
 /**
  * Record reader to read records from an enveloped entry buffer.
  */
-class EnvelopedRecordSetReader implements LogRecordSet.Reader {
+class EnvelopedRecordSetReader implements LogRecordSet.Reader, ReferenceCounted {
 
     private final long logSegmentSeqNo;
     private final long entryId;
     private final long transactionId;
     private final long startSequenceId;
     private int numRecords;
-    private final ByteBuffer reader;
+    private final ByteBuf reader;
 
     // slot id
     private long slotId;
@@ -53,7 +51,7 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader {
                              long startSlotId,
                              int startPositionWithinLogSegment,
                              long startSequenceId,
-                             InputStream in)
+                             ByteBuf in)
             throws IOException {
         this.logSegmentSeqNo = logSegmentSeqNo;
         this.entryId = entryId;
@@ -63,32 +61,35 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader {
         this.startSequenceId = startSequenceId;
 
         // read data
-        DataInputStream src = new DataInputStream(in);
-        int metadata = src.readInt();
-        int version = metadata & METADATA_VERSION_MASK;
-        if (version != VERSION) {
-            throw new IOException(String.format("Version mismatch while reading. Received: %d,"
-                + " Required: %d", version, VERSION));
-        }
-        int codecCode = metadata & METADATA_COMPRESSION_MASK;
-        this.numRecords = src.readInt();
-        int originDataLen = src.readInt();
-        int actualDataLen = src.readInt();
-        byte[] compressedData = new byte[actualDataLen];
-        src.readFully(compressedData);
-
-        if (COMPRESSION_CODEC_LZ4 == codecCode) {
-            CompressionCodec codec = CompressionUtils.getCompressionCodec(CompressionCodec.Type.LZ4);
-            byte[] decompressedData = codec.decompress(compressedData, 0, actualDataLen,
-                    originDataLen, NULL_OP_STATS_LOGGER);
-            this.reader = ByteBuffer.wrap(decompressedData);
-        } else {
-            if (originDataLen != actualDataLen) {
-                throw new IOException("Inconsistent data length found for a non-compressed record set : original = "
-                        + originDataLen + ", actual = " + actualDataLen);
+        try {
+            int metadata = in.readInt();
+            int version = metadata & METADATA_VERSION_MASK;
+            if (version != VERSION) {
+                throw new IOException(String.format("Version mismatch while reading. Received: %d," +
+                        " Required: %d", version, VERSION));
             }
-            this.reader = ByteBuffer.wrap(compressedData);
-        }
+            int codecCode = metadata & METADATA_COMPRESSION_MASK;
+            this.numRecords = in.readInt();
+            int originDataLen = in.readInt();
+            int actualDataLen = in.readInt();
+
+            if (COMPRESSION_CODEC_LZ4 == codecCode) {
+                CompressionCodec codec = CompressionUtils.getCompressionCodec(CompressionCodec.Type.LZ4);
+                this.reader = codec.decompress(
+                        in,
+                        originDataLen,
+                        NULL_OP_STATS_LOGGER);
+            } else {
+                if (originDataLen != actualDataLen) {
+                    throw new IOException("Inconsistent data length found for a non-compressed record set : original = "
+                            + originDataLen + ", actual = " + actualDataLen);
+                }
+                in.retain();
+                this.reader = in;
+            }
+        } finally {
+            in.release();
+       }
     }
 
     @Override
@@ -97,16 +98,13 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader {
             return null;
         }
 
-        int recordLen = reader.getInt();
-        byte[] recordData = new byte[recordLen];
-        reader.get(recordData);
         DLSN dlsn = new DLSN(logSegmentSeqNo, entryId, slotId);
 
         LogRecordWithDLSN record =
                 new LogRecordWithDLSN(dlsn, startSequenceId);
         record.setPositionWithinLogSegment(position);
         record.setTransactionId(transactionId);
-        record.setPayload(recordData);
+        record.readPayload(reader);
 
         ++slotId;
         ++position;
@@ -115,4 +113,13 @@ class EnvelopedRecordSetReader implements LogRecordSet.Reader {
         return record;
     }
 
+    @Override
+    public void retain() {
+        reader.retain();
+    }
+
+    @Override
+    public void release() {
+        reader.release();
+    }
 }

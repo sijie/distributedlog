@@ -19,15 +19,15 @@ package org.apache.distributedlog;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
-import org.apache.distributedlog.exceptions.LogRecordTooLongException;
-import org.apache.distributedlog.exceptions.WriteException;
-import org.apache.distributedlog.io.CompressionCodec;
+import io.netty.buffer.Unpooled;
 import com.twitter.util.Promise;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.stats.OpStatsLogger;
+import org.apache.distributedlog.exceptions.LogRecordTooLongException;
+import org.apache.distributedlog.io.CompressionCodec;
+import org.apache.distributedlog.util.ReferenceCounted;
 
 /**
  * A set of {@link LogRecord}s.
@@ -80,12 +80,11 @@ public class LogRecordSet {
     public static int numRecords(LogRecord record) throws IOException {
         checkArgument(record.isRecordSet(),
                 "record is not a recordset");
-        byte[] data = record.getPayload();
-        return numRecords(data);
+        ByteBuffer buffer = record.getPayloadBuffer();
+        return numRecords(buffer);
     }
 
-    public static int numRecords(byte[] data) throws IOException {
-        ByteBuffer buffer = ByteBuffer.wrap(data);
+    public static int numRecords(ByteBuffer buffer) throws IOException {
         int metadata = buffer.getInt();
         int version = (metadata & METADATA_VERSION_MASK);
         if (version != VERSION) {
@@ -103,7 +102,7 @@ public class LogRecordSet {
     public static Reader of(LogRecordWithDLSN record) throws IOException {
         checkArgument(record.isRecordSet(),
                 "record is not a recordset");
-        byte[] data = record.getPayload();
+        ByteBuffer buffer = record.getPayloadBuffer();
         DLSN dlsn = record.getDlsn();
         int startPosition = record.getPositionWithinLogSegment();
         long startSequenceId = record.getStartSequenceIdOfCurrentSegment();
@@ -115,7 +114,7 @@ public class LogRecordSet {
                 dlsn.getSlotId(),
                 startPosition,
                 startSequenceId,
-                new ByteArrayInputStream(data));
+                Unpooled.wrappedBuffer(buffer));
     }
 
     /**
@@ -132,16 +131,15 @@ public class LogRecordSet {
          *          callback for transmit result. the promise is only
          *          satisfied when this record set is transmitted.
          * @throws LogRecordTooLongException if the record is too long
-         * @throws WriteException when encountered exception writing the record
          */
         void writeRecord(ByteBuffer record, Promise<DLSN> transmitPromise)
-                throws LogRecordTooLongException, WriteException;
+                throws LogRecordTooLongException;
     }
 
     /**
      * Reader to read {@link LogRecord}s from this record set.
      */
-    public interface Reader {
+    public interface Reader extends ReferenceCounted {
 
         /**
          * Read next log record from this record set.

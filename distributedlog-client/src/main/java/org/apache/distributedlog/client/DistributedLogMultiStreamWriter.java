@@ -33,7 +33,6 @@ import org.apache.distributedlog.client.speculative.DefaultSpeculativeRequestExe
 import org.apache.distributedlog.client.speculative.SpeculativeRequestExecutionPolicy;
 import org.apache.distributedlog.client.speculative.SpeculativeRequestExecutor;
 import org.apache.distributedlog.exceptions.LogRecordTooLongException;
-import org.apache.distributedlog.exceptions.WriteException;
 import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.service.DistributedLogClient;
 import com.twitter.finagle.IndividualRequestTimeoutException;
@@ -442,10 +441,6 @@ public class DistributedLogMultiStreamWriter implements Runnable {
         try {
             recordSetWriter.writeRecord(buffer, writePromise);
         } catch (LogRecordTooLongException e) {
-            return Future.exception(e);
-        } catch (WriteException e) {
-            recordSetWriter.abortTransmit(e);
-            recordSetWriter = newRecordSetWriter();
             return Future.exception(e);
         }
         if (recordSetWriter.getNumBytes() >= bufferSize) {

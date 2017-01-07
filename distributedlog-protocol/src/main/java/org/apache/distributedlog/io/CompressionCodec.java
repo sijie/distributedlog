@@ -17,6 +17,7 @@
  */
 package org.apache.distributedlog.io;
 
+import io.netty.buffer.ByteBuf;
 import org.apache.bookkeeper.stats.OpStatsLogger;
 
 /**
@@ -32,43 +33,22 @@ public interface CompressionCodec {
 
     /**
      * Return the compressed data as a byte array.
-     * @param data
-     *          The data to be compressed
-     * @param offset
-     *          The offset in the bytes of data to compress
-     * @param length
-     *          The number of bytes of data to compress
+     *
+     * @param dataBuf
+     *          The data buf to be compressed
      * @param compressionStat
      *          The stat to use for timing the compression operation
      * @return
      *          The compressed data
      *          The returned byte array is sized to the length of the compressed data
      */
-    byte[] compress(byte[] data, int offset, int length, OpStatsLogger compressionStat);
+    ByteBuf compress(ByteBuf dataBuf, OpStatsLogger compressionStat);
 
     /**
      * Return the decompressed data as a byte array.
-     * @param data
-     *          The data to be decompressed
-     * @param offset
-     *          The offset in the bytes of data to decompress
-     * @param length
-     *          The number of bytes of data to decompress
-     * @param decompressionStat
-     *          The stat to use for timing the decompression operation
-     * @return
-     *          The decompressed data
-     */
-    byte[] decompress(byte[] data, int offset, int length, OpStatsLogger decompressionStat);
-
-    /**
-     * Return the decompressed data as a byte array.
-     * @param data
+     *
+     * @param dataBuf
      *          The data to the decompressed
-     * @param offset
-     *          The offset in the bytes of data to decompress
-     * @param length
-     *          The number of bytes of data to decompress
      * @param decompressedSize
      *          The exact size of the decompressed data
      * @param decompressionStat
@@ -76,5 +56,5 @@ public interface CompressionCodec {
      * @return
      *          The decompressed data
      */
-    byte[] decompress(byte[] data, int offset, int length, int decompressedSize, OpStatsLogger decompressionStat);
+    ByteBuf decompress(ByteBuf dataBuf, int decompressedSize, OpStatsLogger decompressionStat);
 }

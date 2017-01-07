@@ -18,12 +18,13 @@
 package org.apache.distributedlog;
 
 import java.nio.ByteBuffer;
+import org.apache.distributedlog.util.ReferenceCounted;
 
 /**
  * Write representation of a {@link LogRecordSet}.
  * It is a buffer of log record set, used for transmission.
  */
-public interface LogRecordSetBuffer {
+public interface LogRecordSetBuffer extends ReferenceCounted {
 
     /**
      * Return number of records in current record set.

@@ -399,7 +399,7 @@ public class LogSegmentMetadata {
                 LogSegmentMetadataVersion.VERSION_V5_SEQUENCE_ID.value;
 
     public static final int LEDGER_METADATA_OLDEST_SUPPORTED_VERSION =
-        LogSegmentMetadataVersion.VERSION_V2_LEDGER_SEQNO.value;
+        LogSegmentMetadataVersion.VERSION_V4_ENVELOPED_ENTRIES.value;
 
     static final int LOGRECORD_COUNT_SHIFT = 32;
     static final long LOGRECORD_COUNT_MASK = 0xffffffff00000000L;

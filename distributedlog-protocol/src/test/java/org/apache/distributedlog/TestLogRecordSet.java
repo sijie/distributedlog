@@ -49,6 +49,7 @@ public class TestLogRecordSet {
 
         ByteBuffer buffer = writer.getBuffer();
         assertEquals("zero user bytes", HEADER_LEN, buffer.remaining());
+        writer.release();
 
         byte[] data = new byte[buffer.remaining()];
         buffer.get(data);
@@ -81,6 +82,8 @@ public class TestLogRecordSet {
         assertEquals("zero records", 0, writer.getNumRecords());
         ByteBuffer buffer = writer.getBuffer();
         assertEquals("zero user bytes", HEADER_LEN, buffer.remaining());
+
+        writer.release();
 
         byte[] data = new byte[buffer.remaining()];
         buffer.get(data);
