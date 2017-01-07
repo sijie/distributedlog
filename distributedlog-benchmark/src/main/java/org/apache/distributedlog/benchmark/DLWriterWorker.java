@@ -18,21 +18,31 @@
 package org.apache.distributedlog.benchmark;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static org.apache.distributedlog.LogRecord.MAX_LOGRECORDSET_SIZE;
+import static org.apache.distributedlog.LogRecord.MAX_LOGRECORD_SIZE;
 
+import com.twitter.util.Future;
+import com.twitter.util.Promise;
 import io.netty.buffer.ByteBuf;
 import org.apache.distributedlog.AsyncLogWriter;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.DistributedLogConfiguration;
 import org.apache.distributedlog.DistributedLogManager;
 import org.apache.distributedlog.LogRecord;
+import org.apache.distributedlog.LogRecordSet;
 import org.apache.distributedlog.benchmark.utils.ShiftableRateLimiter;
+import org.apache.distributedlog.benchmark.utils.StatsReporter;
+import org.apache.distributedlog.exceptions.LogRecordTooLongException;
+import org.apache.distributedlog.io.CompressionCodec;
 import org.apache.distributedlog.namespace.DistributedLogNamespace;
 import org.apache.distributedlog.namespace.DistributedLogNamespaceBuilder;
 import org.apache.distributedlog.util.FutureUtils;
+import org.apache.distributedlog.util.OrderedScheduler;
 import org.apache.distributedlog.util.SchedulerUtils;
 import com.twitter.util.FutureEventListener;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -62,8 +72,10 @@ public class DLWriterWorker implements Worker {
     final int endStreamId;
     final int writeConcurrency;
     final int messageSizeBytes;
+    final OrderedScheduler scheduler;
     final ExecutorService executorService;
     final ScheduledExecutorService rescueService;
+    final StatsReporter statsReporter;
     final ShiftableRateLimiter rateLimiter;
     final Random random;
     final DistributedLogNamespace namespace;
@@ -94,9 +106,15 @@ public class DLWriterWorker implements Worker {
         this.messageSizeBytes = messageSizeBytes;
         this.statsLogger = statsLogger;
         this.requestStat = this.statsLogger.getOpStatsLogger("requests");
+        this.scheduler = OrderedScheduler.newBuilder()
+                .corePoolSize(Runtime.getRuntime().availableProcessors())
+                .name("scheduler")
+                .build();
         this.executorService = Executors.newCachedThreadPool();
         this.rescueService = Executors.newSingleThreadScheduledExecutor();
         this.random = new Random(System.currentTimeMillis());
+
+        this.statsReporter = new StatsReporter(this.requestStat);
 
         this.namespace = DistributedLogNamespaceBuilder.newBuilder()
                 .conf(conf)
@@ -182,6 +200,7 @@ public class DLWriterWorker implements Worker {
     @Override
     public void close() throws IOException {
         this.running = false;
+        SchedulerUtils.shutdownScheduler(this.scheduler, 2, TimeUnit.MINUTES);
         SchedulerUtils.shutdownScheduler(this.executorService, 2, TimeUnit.MINUTES);
         SchedulerUtils.shutdownScheduler(this.rescueService, 2, TimeUnit.MINUTES);
         for (AsyncLogWriter writer : streamWriters) {
@@ -191,6 +210,7 @@ public class DLWriterWorker implements Worker {
             dlm.close();
         }
         namespace.close();
+        statsReporter.shutdown();
     }
 
     @Override
@@ -204,22 +224,53 @@ public class DLWriterWorker implements Worker {
 
     class Writer implements Runnable {
 
+        static final int BUFFER_SIZE = 16 * 1024;
+
         final int idx;
+        final int[] streams;
+        LogRecordSet.Writer recordSetWriter;
+        final Runnable flusher = new Runnable() {
+            @Override
+            public void run() {
+                flush();
+            }
+        };
 
         Writer(int idx) {
             this.idx = idx;
+            this.recordSetWriter = newRecordSetWriter();
+            int numStreamsPerWriter = numStreams / writeConcurrency;
+            int startStreamIdx = idx * numStreamsPerWriter;
+            int endStreamIdx = (idx + 1) * numStreamsPerWriter;
+            if (idx == writeConcurrency - 1) {
+                endStreamIdx = numStreams;
+            }
+            streams = new int[endStreamIdx - startStreamIdx];
+            for (int i = 0; i < streams.length; i++) {
+                streams[i] = startStreamIdx + i;
+            }
+            scheduler.scheduleAtFixedRate(
+                    idx,
+                    flusher,
+                    1,
+                    1,
+                    TimeUnit.MILLISECONDS);
+        }
+
+        private LogRecordSet.Writer newRecordSetWriter() {
+            return LogRecordSet.newWriter(
+                    BUFFER_SIZE,
+                    CompressionCodec.Type.NONE);
         }
 
         @Override
         public void run() {
             LOG.info("Started writer {}.", idx);
             while (running) {
-                final int streamIdx = random.nextInt(numStreams);
-                final AsyncLogWriter writer = streamWriters.get(streamIdx);
-                rateLimiter.getLimiter().acquire();
+                // rateLimiter.getLimiter().acquire();
                 final long requestMillis = System.currentTimeMillis();
                 final ByteBuf buf = Utils.generateMessage(requestMillis, messageSizeBytes);
-                writer.write(new LogRecord(requestMillis, buf.nioBuffer())).addEventListener(new FutureEventListener<DLSN>() {
+                write(buf.nioBuffer()).addEventListener(new FutureEventListener<DLSN>() {
                     @Override
                     public void onSuccess(DLSN value) {
                         requestStat.registerSuccessfulEvent(System.currentTimeMillis() - requestMillis);
@@ -230,11 +281,66 @@ public class DLWriterWorker implements Worker {
                     public void onFailure(Throwable cause) {
                         requestStat.registerFailedEvent(System.currentTimeMillis() - requestMillis);
                         buf.release();
-                        LOG.error("Failed to publish, rescue it : ", cause);
-                        scheduleRescue(streamIdx, writer, 0);
                     }
                 });
             }
+        }
+
+        public Future<DLSN> write(ByteBuffer buffer) {
+            int logRecordSize = buffer.remaining();
+            if (logRecordSize > MAX_LOGRECORD_SIZE) {
+                return Future.exception(new LogRecordTooLongException(
+                        "Log record of size " + logRecordSize + " written when only "
+                                + MAX_LOGRECORD_SIZE + " is allowed"));
+            }
+            // if exceed max number of bytes
+            if ((recordSetWriter.getNumBytes() + logRecordSize) > MAX_LOGRECORDSET_SIZE) {
+                flush();
+            }
+            Promise<DLSN> writePromise = new Promise<DLSN>();
+            try {
+                recordSetWriter.writeRecord(buffer, writePromise);
+            } catch (LogRecordTooLongException e) {
+                return Future.exception(e);
+            }
+            if (recordSetWriter.getNumBytes() >= BUFFER_SIZE) {
+                flush();
+            }
+            return writePromise;
+        }
+
+        private void flush() {
+            final LogRecordSet.Writer recordSetToFlush;
+            synchronized (this) {
+                if (recordSetWriter.getNumRecords() == 0) {
+                    return;
+                }
+                recordSetToFlush = recordSetWriter;
+                recordSetWriter = newRecordSetWriter();
+            }
+            final int streamIdx = random.nextInt(streams.length);
+            final AsyncLogWriter writer = streamWriters.get(streams[streamIdx]);
+            final long requestMillis = System.currentTimeMillis();
+            ByteBuffer buffer = recordSetToFlush.getBuffer();
+            LogRecord recordSet = new LogRecord(requestMillis, buffer);
+            recordSet.setControl();
+            writer.write(recordSet)
+                    .addEventListener(new FutureEventListener<DLSN>() {
+                @Override
+                public void onFailure(Throwable cause) {
+                    recordSetToFlush.abortTransmit(cause);
+                    LOG.error("Failed to publish, rescue it : ", cause);
+                    scheduleRescue(streamIdx, writer, 0);
+                }
+
+                @Override
+                public void onSuccess(DLSN value) {
+                    recordSetToFlush.completeTransmit(
+                            value.getLogSegmentSequenceNo(),
+                            value.getEntryId(),
+                            value.getSlotId());
+                }
+            });
         }
     }
 

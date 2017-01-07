@@ -28,6 +28,7 @@ import org.apache.distributedlog.DistributedLogConfiguration;
 import org.apache.distributedlog.DistributedLogManager;
 import org.apache.distributedlog.LogRecordSet;
 import org.apache.distributedlog.LogRecordWithDLSN;
+import org.apache.distributedlog.benchmark.utils.StatsReporter;
 import org.apache.distributedlog.client.serverset.DLZkServerSet;
 import org.apache.distributedlog.exceptions.DLInterruptedException;
 import org.apache.distributedlog.namespace.DistributedLogNamespace;
@@ -88,6 +89,7 @@ public class ReaderWorker implements Worker {
 
     volatile boolean running = true;
 
+    final StatsReporter statsReporter;
     final StatsReceiver statsReceiver;
     final StatsLogger statsLogger;
     final OpStatsLogger e2eStat;
@@ -139,7 +141,7 @@ public class ReaderWorker implements Worker {
         }
 
         public void processRecord(final LogRecordWithDLSN record) {
-+           long publishTime = Utils.parseMessage(record.getPayloadBuffer());
+            long publishTime = Utils.parseMessage(record.getPayloadBuffer());
             long curTimeMillis = System.currentTimeMillis();
             long e2eLatency = curTimeMillis - publishTime;
             long deliveryLatency = curTimeMillis - record.getTransactionId();
@@ -249,6 +251,8 @@ public class ReaderWorker implements Worker {
                 new ThreadFactoryBuilder().setNameFormat("benchmark.reader-callback-%d").build());
         this.finagleNames = finagleNames;
         this.serverSets = createServerSets(serverSetPaths);
+
+        this.statsReporter = new StatsReporter(e2eStat);
 
         conf.setDeserializeRecordSetOnReads(false);
 
@@ -435,6 +439,7 @@ public class ReaderWorker implements Worker {
         namespace.close();
         SchedulerUtils.shutdownScheduler(executorService, 2, TimeUnit.MINUTES);
         SchedulerUtils.shutdownScheduler(callbackExecutor, 2, TimeUnit.MINUTES);
+        statsReporter.shutdown();
         if (this.dlc != null) {
             this.dlc.close();
         }
