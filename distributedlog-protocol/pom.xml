@@ -84,9 +84,9 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>io.netty</groupId>
-      <artifactId>netty-buffer</artifactId>
-      <version>4.1.6.Final</version>
+      <groupId>org.apache.distributedlog</groupId>
+      <artifactId>distributedlog-3rdparty</artifactId>
+      <version>${project.parent.version}</version>
     </dependency>
   </dependencies>
   <build>
