@@ -23,10 +23,11 @@ import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.twitter.common.zookeeper.ServerSet;
 import com.twitter.finagle.stats.NullStatsReceiver;
-import org.apache.distributedlog.AsyncLogReader;
+import org.apache.distributedlog.AsyncLogIterator;
 import org.apache.distributedlog.DLSN;
 import org.apache.distributedlog.DistributedLogConfiguration;
 import org.apache.distributedlog.DistributedLogManager;
+import org.apache.distributedlog.Entry;
 import org.apache.distributedlog.LogRecordSet;
 import org.apache.distributedlog.LogRecordWithDLSN;
 import org.apache.distributedlog.benchmark.utils.StatsReporter;
@@ -76,7 +77,7 @@ public class ReaderWorker implements Worker {
     final ExecutorService callbackExecutor;
     final DistributedLogNamespace namespace;
     final DistributedLogManager[] dlms;
-    final AsyncLogReader[] logReaders;
+    final AsyncLogIterator[] logReaders;
     final StreamReader[] streamReaders;
     final int numStreams;
     final boolean readFromHead;
@@ -99,7 +100,7 @@ public class ReaderWorker implements Worker {
     final Counter invalidRecordsCounter;
     final Counter outOfOrderSequenceIdCounter;
 
-    class StreamReader implements FutureEventListener<List<LogRecordWithDLSN>>, Runnable, Gauge<Number> {
+    class StreamReader implements FutureEventListener<Entry.Reader>, Runnable, Gauge<Number> {
 
         final int streamIdx;
         final String streamName;
@@ -115,18 +116,32 @@ public class ReaderWorker implements Worker {
         }
 
         @Override
-        public void onSuccess(final List<LogRecordWithDLSN> records) {
-            for (final LogRecordWithDLSN record : records) {
-                if (record.isRecordSet()) {
-                    try {
-                        processRecordSet(record);
-                    } catch (IOException e) {
-                        onFailure(e);
-                    }
-                } else {
-                    processRecord(record);
+        public void onSuccess(Entry.Reader reader) {
+            LogRecordWithDLSN record;
+            try {
+                record = reader.nextRecord(true);
+                if (null == record) {
+                    LOG.info("Found empty entry {}", reader.getEntryId());
                 }
+                while (null != record) {
+                    if (record.isRecordSet()) {
+                        try {
+                            processRecordSet(record);
+                        } catch (IOException e) {
+                            onFailure(e);
+                        }
+                    } else if (!record.isControl()) {
+                        processRecord(record);
+                    }
+                    record = reader.nextRecord(true);
+                }
+            } catch (Throwable t) {
+                LOG.error("Encountered exception : ", t);
+                onFailure(t);
+                reader.release();
+                return;
             }
+            reader.release();
             readLoop();
         }
 
@@ -137,6 +152,7 @@ public class ReaderWorker implements Worker {
                 processRecord(nextRecord);
                 nextRecord = reader.nextRecord();
             }
+            reader.release();
         }
 
         public void processRecord(final LogRecordWithDLSN record) {
@@ -175,7 +191,7 @@ public class ReaderWorker implements Worker {
             if (!running) {
                 return;
             }
-            logReaders[streamIdx].readBulk(10).addEventListener(this);
+            logReaders[streamIdx].readNext().addEventListener(this);
         }
 
         @Override
@@ -303,7 +319,7 @@ public class ReaderWorker implements Worker {
                 .build();
         this.numStreams = endStreamId - startStreamId;
         this.dlms = new DistributedLogManager[numStreams];
-        this.logReaders = new AsyncLogReader[numStreams];
+        this.logReaders = new AsyncLogIterator[numStreams];
         final CountDownLatch latch = new CountDownLatch(numStreams);
         for (int i = 0; i < numStreams; i++) {
             final int idx = i;
@@ -394,7 +410,7 @@ public class ReaderWorker implements Worker {
             }
         }
         try {
-            logReaders[idx] = dlms[idx].getAsyncLogReader(lastDLSN);
+            logReaders[idx] = FutureUtils.result(dlms[idx].openAsyncLogIterator(lastDLSN));
         } catch (IOException ioe) {
             LOG.error("Failed on opening reader for stream {} starting from {} : ",
                       new Object[] { streamName, lastDLSN, ioe });
@@ -423,7 +439,7 @@ public class ReaderWorker implements Worker {
     @Override
     public void close() throws IOException {
         this.running = false;
-        for (AsyncLogReader reader : logReaders) {
+        for (AsyncLogIterator reader : logReaders) {
             if (null != reader) {
                 FutureUtils.result(reader.asyncClose());
             }

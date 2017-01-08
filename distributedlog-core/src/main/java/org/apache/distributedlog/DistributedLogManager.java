@@ -140,6 +140,8 @@ public interface DistributedLogManager extends AsyncCloseable, Closeable {
      */
     public Future<AsyncLogReader> openAsyncLogReader(DLSN fromDLSN);
 
+    Future<AsyncLogIterator> openAsyncLogIterator(DLSN fromDLSN);
+
     // @Deprecated
     public AsyncLogReader getAsyncLogReader(long fromTxnId) throws IOException;
 

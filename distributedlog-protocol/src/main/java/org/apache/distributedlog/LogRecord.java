@@ -434,7 +434,7 @@ public class LogRecord {
             if (!allocateBuffer) {
                 try {
                     ByteBuffer buffer = in.nioBuffer(in.readerIndex(), length);
-                    in.setIndex(in.readerIndex() + length, in.writerIndex());
+                    in.skipBytes(length);
                     return buffer;
                 } catch (UnsupportedOperationException noe) {
                     LOG.debug("Can't create nio buffer. Then allocate a new nio buffer.", noe);

@@ -732,6 +732,18 @@ class BKDistributedLogManager implements DistributedLogManager {
         return Future.value(reader);
     }
 
+    @Override
+    public Future<AsyncLogIterator> openAsyncLogIterator(DLSN fromDLSN) {
+        Optional<String> subscriberId = Optional.absent();
+        AsyncLogIterator reader = new BKAsyncLogIterator(
+                this,
+                scheduler,
+                fromDLSN,
+                subscriberId);
+        pendingReaders.add(reader);
+        return Future.value(reader);
+    }
+
     /**
      * Note the lock here is a sort of elective exclusive lock. I.e. acquiring this lock will only prevent other
      * people who try to acquire the lock from reading from the stream. Normal readers (and writers) will not be
@@ -1050,7 +1062,7 @@ class BKDistributedLogManager implements DistributedLogManager {
 
         @Override
         public Future<Void> asyncClose() {
-            return Utils.closeSequence(executorService, true, readers.toArray(new AsyncLogReader[readers.size()]))
+            return Utils.closeSequence(executorService, true, readers.toArray(new AsyncCloseable[readers.size()]))
                     .onSuccess(new AbstractFunction1<Void, BoxedUnit>() {
                         @Override
                         public BoxedUnit apply(Void value) {
