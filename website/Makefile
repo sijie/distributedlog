@@ -12,7 +12,7 @@ setup:
 	chmod +x get-pip.py
 	python get-pip.py
 	rm get-pip.py
-	pip install docutils pygments
+	pip install --user docutils pygments
 
 local:
 	./build.sh local
