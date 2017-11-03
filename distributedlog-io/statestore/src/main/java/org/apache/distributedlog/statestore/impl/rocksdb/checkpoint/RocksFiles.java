@@ -30,9 +30,9 @@ import org.apache.bookkeeper.common.concurrent.FutureEventListener;
 import org.apache.bookkeeper.common.concurrent.FutureUtils;
 
 /**
- * Manage all the sst files.
+ * Manage all the rocksdb files.
  */
-class RocksSSTFiles {
+class RocksFiles {
 
     private final BookKeeper bk;
     private final ScheduledExecutorService executor;
@@ -41,9 +41,9 @@ class RocksSSTFiles {
     private final Map<String, RocksFileInfo> completedSstFiles;
     private final Map<String, CompletableFuture<RocksFileInfo>> inprogressSstFiles;
 
-    RocksSSTFiles(BookKeeper bk,
-                  ScheduledExecutorService executor,
-                  int numReplicas) {
+    RocksFiles(BookKeeper bk,
+               ScheduledExecutorService executor,
+               int numReplicas) {
         this.bk = bk;
         this.executor = executor;
         this.numReplicas = numReplicas;
@@ -57,10 +57,6 @@ class RocksSSTFiles {
     }
 
     CompletableFuture<RocksFileInfo> copySstFile(String name, File file) {
-        if (!file.getName().endsWith(".sst")) {
-            return FutureUtils.exception(new IllegalArgumentException("File " + file + " is not a sst file"));
-        }
-
         final CompletableFuture<RocksFileInfo> future;
         synchronized (this) {
             RocksFileInfo fileInfo = getSstFileInfo(name);
@@ -95,7 +91,7 @@ class RocksSSTFiles {
         copier.future().whenCompleteAsync(new FutureEventListener<RocksFileInfo>() {
             @Override
             public void onSuccess(RocksFileInfo fileInfo) {
-                synchronized (RocksSSTFiles.this) {
+                synchronized (RocksFiles.this) {
                     completedSstFiles.put(name, fileInfo);
                     inprogressSstFiles.remove(name, future);
                 }
@@ -104,7 +100,7 @@ class RocksSSTFiles {
 
             @Override
             public void onFailure(Throwable throwable) {
-                synchronized (RocksSSTFiles.this) {
+                synchronized (RocksFiles.this) {
                     inprogressSstFiles.remove(name, future);
                 }
                 future.completeExceptionally(throwable);

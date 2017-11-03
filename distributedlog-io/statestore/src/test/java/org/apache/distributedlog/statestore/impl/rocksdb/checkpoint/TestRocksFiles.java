@@ -45,9 +45,9 @@ import org.junit.Test;
 import org.junit.rules.TestName;
 
 /**
- * Unit test of {@link RocksSSTFiles}.
+ * Unit test of {@link RocksFiles}.
  */
-public class TestRocksSSTFiles extends TestDistributedLogBase {
+public class TestRocksFiles extends TestDistributedLogBase {
 
     @Rule
     public final TestName runtime = new TestName();
@@ -56,7 +56,7 @@ public class TestRocksSSTFiles extends TestDistributedLogBase {
     private BookKeeper bk;
     private File tempDir;
     private ScheduledExecutorService ioScheduler;
-    private RocksSSTFiles sstFiles;
+    private RocksFiles sstFiles;
 
     @Before
     @Override
@@ -67,7 +67,7 @@ public class TestRocksSSTFiles extends TestDistributedLogBase {
         this.clientConf.setZkServers(zkServers);
         this.bk = BookKeeper.newBuilder(clientConf).build();
         this.ioScheduler = Executors.newSingleThreadScheduledExecutor();
-        this.sstFiles = new RocksSSTFiles(
+        this.sstFiles = new RocksFiles(
             bk,
             ioScheduler,
             3);
