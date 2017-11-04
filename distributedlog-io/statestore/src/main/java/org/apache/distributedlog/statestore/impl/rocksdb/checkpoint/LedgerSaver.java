@@ -38,7 +38,7 @@ import org.apache.bookkeeper.common.concurrent.FutureUtils;
 import org.apache.distributedlog.util.Utils;
 
 /**
- * A task to copy a ledger to a file
+ * A task to copy a ledger to a file.
  */
 @Slf4j
 class LedgerSaver implements Runnable, FutureEventListener<Iterable<LedgerEntry>> {
