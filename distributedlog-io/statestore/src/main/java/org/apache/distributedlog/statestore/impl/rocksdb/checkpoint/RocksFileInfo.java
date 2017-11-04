@@ -33,7 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 @ToString
 @Getter
 @Slf4j
-public class RocksFileInfo {
+class RocksFileInfo {
 
     // sst file name
     private final String name;

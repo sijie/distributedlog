@@ -44,6 +44,7 @@ class LedgerCopier implements Runnable {
 
     private static final int BUFFER_SIZE = 128 * 1024;
 
+    private final String name;
     private final File srcFile;
     private final BookKeeper bkc;
     private final ScheduledExecutorService ioScheduler;
@@ -58,11 +59,13 @@ class LedgerCopier implements Runnable {
     private WriteHandle destLh;
 
     LedgerCopier(BookKeeper bkc,
+                 String name,
                  File srcFile,
                  ScheduledExecutorService ioScheduler,
                  int ensmebleSize,
                  int writeQuorumSize,
                  int ackQuorumSize) {
+        this.name = name;
         this.bkc = bkc;
         this.srcFile = srcFile;
         this.ioScheduler = ioScheduler;
@@ -174,7 +177,7 @@ class LedgerCopier implements Runnable {
         }
 
         RocksFileInfo info = new RocksFileInfo(
-                srcFile.getName(),
+                name,
                 wh.getId(),
                 srcFile.length());
         // when reach here, we have sent all the data to a given ledger. we wait until the writes are completed.

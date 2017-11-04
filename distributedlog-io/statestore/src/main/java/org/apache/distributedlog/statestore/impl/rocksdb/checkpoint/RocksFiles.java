@@ -78,6 +78,7 @@ class RocksFiles {
 
         LedgerCopier copier = new LedgerCopier(
             bk,
+            name,
             file,
             executor,
             numReplicas,

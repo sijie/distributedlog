@@ -22,74 +22,30 @@ import static org.apache.bookkeeper.common.concurrent.FutureUtils.result;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
-import com.google.common.io.Files;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import org.apache.bookkeeper.client.BKException.BKNoSuchLedgerExistsException;
-import org.apache.bookkeeper.client.BookKeeper.DigestType;
-import org.apache.bookkeeper.client.LedgerHandle;
-import org.apache.bookkeeper.client.api.BookKeeper;
-import org.apache.bookkeeper.conf.ClientConfiguration;
-import org.apache.commons.io.FileUtils;
-import org.apache.distributedlog.TestDistributedLogBase;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestName;
 
 /**
  * Unit test of {@link RocksFiles}.
  */
-public class TestRocksFiles extends TestDistributedLogBase {
+public class TestRocksFiles extends TestRocksdbCheckpointBase {
 
-    @Rule
-    public final TestName runtime = new TestName();
-
-    private ClientConfiguration clientConf;
-    private BookKeeper bk;
-    private File tempDir;
-    private ScheduledExecutorService ioScheduler;
     private RocksFiles sstFiles;
 
-    @Before
     @Override
-    public void setup() throws Exception {
-        super.setup();
-        this.tempDir = Files.createTempDir();
-        this.clientConf = new ClientConfiguration();
-        this.clientConf.setZkServers(zkServers);
-        this.bk = BookKeeper.newBuilder(clientConf).build();
-        this.ioScheduler = Executors.newSingleThreadScheduledExecutor();
+    protected void doSetup() {
         this.sstFiles = new RocksFiles(
             bk,
             ioScheduler,
             3);
     }
 
-    @After
-    @Override
-    public void teardown() throws Exception {
-        if (null != ioScheduler) {
-            ioScheduler.shutdown();
-        }
-        if (null != bk) {
-            this.bk.close();
-        }
-        if (null != tempDir) {
-            FileUtils.deleteDirectory(tempDir);
-        }
-        super.teardown();
-    }
-
     private File createFileAndWriteContent() throws Exception {
-        File file = new File(tempDir, runtime.getMethodName() + ".sst");
+        File file = new File(baseDir, runtime.getMethodName() + ".sst");
         BufferedWriter bw = new BufferedWriter(
             new OutputStreamWriter(
                 new FileOutputStream(file)
@@ -102,31 +58,6 @@ public class TestRocksFiles extends TestDistributedLogBase {
         bw.flush();
         bw.close();
         return file;
-    }
-
-    private void verifyFileCopied(RocksFileInfo fi) throws Exception {
-        org.apache.bookkeeper.client.BookKeeper bkc =
-            org.apache.bookkeeper.client.BookKeeper.forConfig(clientConf).build();
-        LedgerHandle lh = bkc.openLedgerNoRecovery(
-            fi.getLedgerId(),
-            DigestType.CRC32,
-            new byte[0]);
-        assertEquals(fi.getLength(), lh.getLength());
-        assertTrue(lh.isClosed());
-        bkc.close();
-    }
-
-    private void verifyLedgerDeleted(RocksFileInfo fi) throws Exception {
-        try {
-            result(bk.newOpenLedgerOp()
-                .withDigestType(org.apache.bookkeeper.client.api.DigestType.CRC32)
-                .withLedgerId(fi.getLedgerId())
-                .withPassword(new byte[0])
-                .execute());
-            fail("ledger " + fi.getLedgerId() + " should be deleted");
-        } catch (BKNoSuchLedgerExistsException e) {
-            assertTrue(true);
-        }
     }
 
     @Test

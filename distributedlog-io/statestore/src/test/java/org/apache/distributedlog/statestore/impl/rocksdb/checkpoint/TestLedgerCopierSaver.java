@@ -93,6 +93,7 @@ public class TestLedgerCopierSaver extends TestDistributedLogBase {
 
         LedgerCopier copier = new LedgerCopier(
             bk,
+            runtime.getMethodName(),
             emptyFile,
             ioScheduler,
             3,
@@ -161,6 +162,7 @@ public class TestLedgerCopierSaver extends TestDistributedLogBase {
 
         LedgerCopier copier = new LedgerCopier(
             bk,
+            runtime.getMethodName(),
             srcFile,
             ioScheduler,
             3,

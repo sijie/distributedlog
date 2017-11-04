@@ -30,6 +30,7 @@ import static org.apache.distributedlog.statestore.impl.rocksdb.RocksConstants.D
 import static org.apache.distributedlog.statestore.impl.rocksdb.RocksConstants.MAX_WRITE_BUFFERS;
 import static org.apache.distributedlog.statestore.impl.rocksdb.RocksConstants.WRITE_BUFFER_SIZE;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import com.google.common.primitives.SignedBytes;
 import java.io.File;
@@ -105,7 +106,8 @@ public class RocksdbKVStore<K, V> implements KVStore<K, V> {
         }
     }
 
-    synchronized RocksDB getDb() {
+    @VisibleForTesting
+    public synchronized RocksDB getDb() {
         return db;
     }
 
