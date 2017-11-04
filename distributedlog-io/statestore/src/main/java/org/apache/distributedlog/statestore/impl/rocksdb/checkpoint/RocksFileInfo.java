@@ -18,18 +18,21 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
+import com.google.common.collect.Sets;
+import java.util.Collections;
+import java.util.Set;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Represents an sst table file.
  */
 @EqualsAndHashCode
 @ToString
-@RequiredArgsConstructor
 @Getter
+@Slf4j
 public class RocksFileInfo {
 
     // sst file name
@@ -38,23 +41,28 @@ public class RocksFileInfo {
     private final long ledgerId;
     // data length
     private final long length;
-    // how many checkpoints reference this sstable
-    private int refCnt = 0;
+    // links : who is linking to this file
+    private final Set<String> links;
 
-    public synchronized int getRefCnt() {
-        return refCnt;
+    RocksFileInfo(String name,
+                  long ledgerId,
+                  long length) {
+        this.name = name;
+        this.ledgerId = ledgerId;
+        this.length = length;
+        this.links = Collections.synchronizedSet(Sets.newHashSet());
     }
 
-    public synchronized int refCnt() {
-        return refCnt;
+    int numLinks() {
+        return links.size();
     }
 
-    public synchronized int incRef() {
-        return ++refCnt;
+    boolean link(String linkName) {
+        return this.links.add(linkName);
     }
 
-    public synchronized int decRef() {
-        return --refCnt;
+    boolean unlink(String linkName) {
+        return this.links.remove(linkName);
     }
 
 }

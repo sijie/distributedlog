@@ -56,27 +56,23 @@ class RocksFiles {
         return completedSstFiles.get(name);
     }
 
-    CompletableFuture<RocksFileInfo> copySstFile(String name, File file) {
+    CompletableFuture<RocksFileInfo> copySstFile(String checkpointName, String name, File file) {
         final CompletableFuture<RocksFileInfo> future;
         synchronized (this) {
             RocksFileInfo fileInfo = getSstFileInfo(name);
             if (null != fileInfo) {
-                fileInfo.incRef();
+                fileInfo.link(checkpointName);
                 return FutureUtils.value(fileInfo);
             }
             // no sst file is available, schedule a copy task
             CompletableFuture<RocksFileInfo> localFuture = inprogressSstFiles.get(name);
             if (null != localFuture) {
                 return localFuture.thenApply(f -> {
-                    f.incRef();
+                    f.link(checkpointName);
                     return f;
                 });
             }
             future = FutureUtils.createFuture();
-            future.thenApply(f -> {
-                f.incRef();
-                return f;
-            });
             inprogressSstFiles.put(name, future);
         }
 
@@ -106,20 +102,23 @@ class RocksFiles {
                 future.completeExceptionally(throwable);
             }
         }, executor);
-        return future;
+        return future.thenApply(f -> {
+            f.link(checkpointName);
+            return f;
+        });
     }
 
-    CompletableFuture<RocksFileInfo> deleteSstFile(String name) {
+    CompletableFuture<RocksFileInfo> deleteSstFile(String checkpointName, String name) {
         synchronized (this) {
             RocksFileInfo fileInfo = getSstFileInfo(name);
             if (null != fileInfo) {
-                if (0 == fileInfo.decRef()) {
+                fileInfo.unlink(checkpointName);
+                if (fileInfo.getLinks().isEmpty()) {
                     return deleteSstFile(fileInfo);
                 }
             }
             return FutureUtils.value(fileInfo);
         }
-
     }
 
     private CompletableFuture<RocksFileInfo> deleteSstFile(RocksFileInfo fi) {

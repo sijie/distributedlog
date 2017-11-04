@@ -133,13 +133,13 @@ public class TestRocksFiles extends TestDistributedLogBase {
     public void testGetSstFileNotExists() throws Exception {
         String name = runtime.getMethodName() + ".sst";
         File file = createFileAndWriteContent();
-        RocksFileInfo fi = result(sstFiles.copySstFile(name, file));
+        RocksFileInfo fi = result(sstFiles.copySstFile("ckpt", name, file));
         assertEquals(fi.getName(), name);
         assertEquals(fi.getLength(), file.length());
         assertTrue(fi.getLedgerId() > 0);
         verifyFileCopied(fi);
 
-        RocksFileInfo deletedFi = result(sstFiles.deleteSstFile(name));
+        RocksFileInfo deletedFi = result(sstFiles.deleteSstFile("ckpt", name));
         assertEquals(fi, deletedFi);
         verifyLedgerDeleted(deletedFi);
     }
@@ -149,30 +149,30 @@ public class TestRocksFiles extends TestDistributedLogBase {
         // create the sst file
         String name = runtime.getMethodName() + ".sst";
         File file = createFileAndWriteContent();
-        RocksFileInfo fi = result(sstFiles.copySstFile(name, file));
+        RocksFileInfo fi = result(sstFiles.copySstFile("checkpoint1", name, file));
         assertEquals(fi.getName(), name);
         assertEquals(fi.getLength(), file.length());
         assertTrue(fi.getLedgerId() > 0);
-        assertEquals(1, fi.refCnt());
+        assertEquals("" + fi, 1, fi.numLinks());
         verifyFileCopied(fi);
         assertNotNull(sstFiles.getSstFileInfo(name));
 
         // attempt to get the sst file
-        RocksFileInfo getFi = result(sstFiles.copySstFile(name, file));
+        RocksFileInfo getFi = result(sstFiles.copySstFile("checkpoint2", name, file));
         assertEquals(fi, getFi);
-        assertEquals(2, fi.refCnt());
+        assertEquals(2, fi.numLinks());
 
         // attempt to delete the sst file
-        RocksFileInfo deleteFi = result(sstFiles.deleteSstFile(name));
+        RocksFileInfo deleteFi = result(sstFiles.deleteSstFile("checkpoint1", name));
         assertEquals(fi, deleteFi);
         assertEquals(getFi, deleteFi);
-        assertEquals(1, deleteFi.refCnt());
+        assertEquals(1, deleteFi.numLinks());
         verifyFileCopied(deleteFi);
 
         // delete the sst file again. the ledger is deleted when refCnt goes down to zero
-        RocksFileInfo deleteFi2 = result(sstFiles.deleteSstFile(name));
+        RocksFileInfo deleteFi2 = result(sstFiles.deleteSstFile("checkpoint2", name));
         assertEquals(deleteFi, deleteFi2);
-        assertEquals(0, deleteFi2.refCnt());
+        assertEquals(0, deleteFi2.numLinks());
         verifyLedgerDeleted(deleteFi2);
     }
 
