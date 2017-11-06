@@ -23,11 +23,19 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import org.apache.commons.io.FileUtils;
+import org.apache.distributedlog.statestore.exceptions.StateStoreException;
+import org.apache.distributedlog.statestore.impl.rocksdb.RocksdbKVStore;
 import org.junit.Test;
+import org.rocksdb.RocksDBException;
 
 /**
  * Unit test for checkpoints.
@@ -38,7 +46,7 @@ public class TestRocksCheckpoints extends TestRocksdbCheckpointBase {
     private RocksCheckpoints checkpoints;
 
     @Override
-    protected void doSetup() {
+    protected void doSetup() throws Exception {
         super.doSetup();
         checkpointDir = new File(baseDir, "checkpoints");
         checkpointDir.mkdirs();
@@ -119,6 +127,118 @@ public class TestRocksCheckpoints extends TestRocksdbCheckpointBase {
         result(checkpoints.deleteCheckpoint(checkpointName));
         assertNull(checkpoints.getCompletedCheckpoint(checkpointName));
         assertFalse(new File(checkpointDir, checkpointName).exists());
+    }
+
+    private RocksCheckpoint checkpoint() throws Exception {
+        return checkpoint(runtime.getMethodName());
+    }
+
+    private RocksCheckpoint checkpoint(String checkpointName) throws Exception {
+        writeKvs(100);
+        store.flush();
+
+        RocksCheckpoint checkpoint = result(checkpoints.checkpoint(checkpointName));
+
+        verifyCheckpoint(
+            new File(checkpointDir, checkpointName),
+            checkpoint);
+        return checkpoint;
+    }
+
+    @Test
+    public void testRestoreCheckpointToExistDir() throws Exception {
+        checkpoint();
+        File destDir = new File(baseDir, "restore-" + runtime.getMethodName());
+        assertTrue(destDir.mkdir());
+        try {
+            result(checkpoints.restoreCheckpoint(runtime.getMethodName(), destDir));
+            fail("Should fail to restore a checkpoint to an exist dir");
+        } catch (IOException ioe) {
+            assertEquals("Dir " + destDir + " already exists", ioe.getMessage());
+        }
+    }
+
+    @Test
+    public void testRestoreNotExistCheckpoint() throws Exception {
+        File destDir = new File(baseDir, "restore-" + runtime.getMethodName());
+        try {
+            result(checkpoints.restoreCheckpoint(runtime.getMethodName() + "-1", destDir));
+            fail("Should fail to restore a not exist checkpoint");
+        } catch (IOException ioe) {
+            assertEquals("Checkpoint " + runtime.getMethodName() + "-1 is not found", ioe.getMessage());
+        }
+    }
+
+    @Test
+    public void testRestoreCheckpointMissingLocalDir() throws Exception {
+        RocksCheckpoint checkpoint = checkpoint();
+        File srcDir = new File(checkpointDir, runtime.getMethodName());
+        FileUtils.deleteDirectory(srcDir);
+        File destDir = new File(baseDir, "restore-" + runtime.getMethodName());
+        result(checkpoints.restoreCheckpoint(runtime.getMethodName(), destDir));
+        verifyCheckpoint(
+            destDir,
+            new File(checkpointDir, runtime.getMethodName()),
+            checkpoint);
+
+        RocksdbKVStore<String, String> aStore = openStore(destDir);
+        try {
+            readKvsAndVerify(aStore, 100);
+        } finally {
+            aStore.close();
+        }
+    }
+
+    @Test
+    public void testRestoreCheckpoint() throws Exception {
+        RocksCheckpoint checkpoint = checkpoint();
+        File destDir = new File(baseDir, "restore-" + runtime.getMethodName());
+        result(checkpoints.restoreCheckpoint(runtime.getMethodName(), destDir));
+        verifyCheckpoint(
+            destDir,
+            new File(checkpointDir, runtime.getMethodName()),
+            checkpoint);
+        RocksdbKVStore<String, String> aStore = openStore(destDir);
+        try {
+            readKvsAndVerify(aStore, 100);
+        } finally {
+            aStore.close();
+        }
+    }
+
+    @Test
+    public void testRestoreCheckpointCorruptedLocalState() throws Exception {
+        RocksCheckpoint checkpoint = checkpoint();
+        store.close();
+
+        File srcDir = new File(checkpointDir, runtime.getMethodName());
+        for (File file : srcDir.listFiles()) {
+            long oldLength = file.length();
+            FileChannel out = new FileOutputStream(file, true).getChannel();
+            out.truncate(oldLength / 2);
+            out.force(true);
+            out.close();
+            assertEquals(oldLength / 2, file.length());
+        }
+        try {
+            openStore(srcDir);
+            fail("Should fail to restart with corrupted files");
+        } catch (StateStoreException e) {
+            assertTrue(e.getCause() instanceof RocksDBException);
+        }
+
+        File destDir = new File(baseDir, "restore-" + runtime.getMethodName());
+        result(checkpoints.restoreCheckpoint(runtime.getMethodName(), destDir));
+        verifyCheckpoint(
+            destDir,
+            new File(checkpointDir, runtime.getMethodName()),
+            checkpoint);
+        RocksdbKVStore<String, String> aStore = openStore(destDir);
+        try {
+            readKvsAndVerify(aStore, 100);
+        } finally {
+            aStore.close();
+        }
     }
 
 }

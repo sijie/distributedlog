@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.bookkeeper.util.HardLink;
 import org.apache.commons.io.FileUtils;
 import org.apache.distributedlog.common.concurrent.FutureEventListener;
 import org.apache.distributedlog.common.concurrent.FutureUtils;
@@ -174,6 +175,67 @@ class RocksCheckpoints implements AutoCloseable {
             }
         });
         return future;
+    }
+
+    CompletableFuture<Void> restoreCheckpoint(String checkpointName, File destDir) {
+        RocksCheckpoint checkpoint;
+        synchronized (this) {
+            checkpoint = completedCheckpoints.get(checkpointName);
+        }
+        if (null == checkpoint) {
+            return FutureUtils.exception(
+                new IOException("Checkpoint " + checkpointName + " is not found"));
+        }
+        // we got a checkpoint, restore it
+        CompletableFuture<Void> future = FutureUtils.createFuture();
+        executor.submit(() -> doRestoreCheckpoint(future, checkpointName, checkpoint, destDir));
+        return future;
+    }
+
+    void doRestoreCheckpoint(CompletableFuture<Void> future,
+                             String checkpointName,
+                             RocksCheckpoint checkpoint,
+                             File destDir) {
+
+        if (!destDir.mkdir()) {
+            future.completeExceptionally(new IOException(
+                "Dir " + destDir + " already exists"));
+            return;
+        }
+
+        File srcDir = new File(checkpointDir, checkpointName);
+        if (srcDir.exists()) {
+            File[] srcFiles = srcDir.listFiles();
+            String[] srcFileNames = new String[srcFiles.length];
+            int idx = 0;
+            for (File file : srcFiles) {
+                srcFileNames[idx++] = file.getName();
+            }
+            try {
+                HardLink.createHardLinkMult(
+                    srcDir,
+                    srcFileNames,
+                    destDir
+                );
+            } catch (IOException ioe) {
+                future.completeExceptionally(ioe);
+                return;
+            }
+        } else {
+            if (log.isDebugEnabled()) {
+                log.debug("local checkpoint {} dir doesn't exist, so do a fresh restore", srcDir);
+            }
+        }
+        // restore the checkpoint
+        RocksRestoreInprogress inprogress = new RocksRestoreInprogress(
+            rocksFiles.getBk(),
+            checkpoint,
+            destDir,
+            executor);
+        executor.submit(inprogress);
+        FutureUtils.proxyTo(
+            inprogress.future(),
+            future);
     }
 
     @Override

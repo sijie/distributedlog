@@ -41,7 +41,7 @@ public class TestRocksdbCheckpointBase extends TestRocksdbBase {
     protected RocksFiles rocksFiles;
 
     @Override
-    protected void doSetup() {
+    protected void doSetup() throws Exception {
         dbCheckpointer = Checkpoint.create(store.getDb());
         rocksFiles = new RocksFiles(
             bk,
@@ -80,7 +80,13 @@ public class TestRocksdbCheckpointBase extends TestRocksdbBase {
     }
 
     protected void verifyCheckpoint(File checkpointDir, RocksCheckpoint checkpoint) throws Exception {
-        File[] children = checkpointDir.listFiles();
+        verifyCheckpoint(checkpointDir, checkpointDir, checkpoint);
+    }
+
+    protected void verifyCheckpoint(File restoreDir,
+                                    File checkpointDir,
+                                    RocksCheckpoint checkpoint) throws Exception {
+        File[] children = restoreDir.listFiles();
         assertEquals(children.length, checkpoint.getFiles().size());
         for (File file : children) {
             String name;
@@ -90,7 +96,7 @@ public class TestRocksdbCheckpointBase extends TestRocksdbBase {
                 name = checkpointDir.getName() + "/" + file.getName();
             }
             RocksFileInfo fi = checkpoint.getFiles().get(name);
-            assertNotNull(fi);
+            assertNotNull("File " + name + " doesn't exist", fi);
             assertEquals(name, fi.getName());
             assertEquals(file.length(), fi.getLength());
             assertTrue(fi.getLedgerId() > 0);

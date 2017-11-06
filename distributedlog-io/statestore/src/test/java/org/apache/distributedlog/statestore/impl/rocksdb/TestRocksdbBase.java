@@ -18,6 +18,8 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb;
 
+import static org.junit.Assert.assertEquals;
+
 import com.google.common.io.Files;
 import java.io.File;
 import java.util.concurrent.Executors;
@@ -81,7 +83,7 @@ public abstract class TestRocksdbBase extends TestDistributedLogBase {
         doSetup();
     }
 
-    protected void doSetup() {}
+    protected void doSetup() throws Exception {}
 
     @After
     public void teardown() throws Exception {
@@ -116,6 +118,25 @@ public abstract class TestRocksdbBase extends TestDistributedLogBase {
         multi.execute();
     }
 
+    protected void readKvsAndVerify(RocksdbKVStore<String, String> db, int numPairs) {
+        for (int i = 0; i < numPairs; i++) {
+            String key = getKey(i);
+            String value = db.get(key);
+            assertEquals(getValue(i), value);
+        }
+    }
 
+    protected static RocksdbKVStore<String, String> openStore(File dir) throws Exception {
+        StateStoreSpec spec = StateStoreSpec.newBuilder()
+            .name(dir.getName())
+            .keyCoder(StringUtf8Coder.of())
+            .valCoder(StringUtf8Coder.of())
+            .localStateStoreDir(dir)
+            .stream(dir.getName())
+            .build();
+        RocksdbKVStore<String, String> store = new RocksdbKVStore<>();
+        store.init(spec);
+        return store;
+    }
 
 }

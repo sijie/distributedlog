@@ -51,6 +51,10 @@ class RocksFiles {
         this.inprogressSstFiles = Collections.synchronizedMap(Maps.newHashMap());
     }
 
+    BookKeeper getBk() {
+        return bk;
+    }
+
     @VisibleForTesting
     synchronized RocksFileInfo getSstFileInfo(String name) {
         return completedSstFiles.get(name);

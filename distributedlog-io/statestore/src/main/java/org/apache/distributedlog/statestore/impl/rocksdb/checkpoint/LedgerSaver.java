@@ -68,7 +68,11 @@ class LedgerSaver implements Runnable, FutureEventListener<Iterable<LedgerEntry>
                 ScheduledExecutorService ioScheduler) {
         this.bkc = bkc;
         this.rocksFileInfo = fileInfo;
-        this.destFile = new File(destDir, fileInfo.getName());
+        if (fileInfo.getName().endsWith(".sst")) {
+            this.destFile = new File(destDir, fileInfo.getName());
+        } else {
+            this.destFile = new File(destDir, new File(fileInfo.getName()).getName());
+        }
         this.ioScheduler = ioScheduler;
         this.future = FutureUtils.createFuture();
 
