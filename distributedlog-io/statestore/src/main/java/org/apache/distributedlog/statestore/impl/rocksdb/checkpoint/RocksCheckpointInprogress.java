@@ -18,6 +18,10 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
+import static org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils.newAbortedCheckpointCommand;
+import static org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils.newAbortingCheckpointCommand;
+import static org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils.newCommitCheckpointCommand;
+
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.io.File;
@@ -28,6 +32,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.bookkeeper.common.concurrent.FutureEventListener;
 import org.apache.bookkeeper.common.concurrent.FutureUtils;
+import org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils;
 import org.rocksdb.Checkpoint;
 import org.rocksdb.RocksDBException;
 
@@ -43,20 +48,24 @@ class RocksCheckpointInprogress implements Runnable, FutureEventListener<List<Ro
     private final ScheduledExecutorService ioScheduler;
     private final CompletableFuture<RocksCheckpoint> future;
     private final RocksFiles rocksFiles;
+    private final CheckpointLog checkpointLog;
 
     // state
     private File[] files;
     private List<CompletableFuture<RocksFileInfo>> copyTasks;
+    private long checkpointId;
 
     RocksCheckpointInprogress(Checkpoint checkpoint,
                               String checkpointName,
                               File path,
                               RocksFiles rocksFiles,
+                              CheckpointLog checkpointLog,
                               ScheduledExecutorService ioScheduler) {
         this.checkpointName = checkpointName;
         this.path = path;
         this.checkpoint = checkpoint;
         this.rocksFiles = rocksFiles;
+        this.checkpointLog = checkpointLog;
         this.ioScheduler = ioScheduler;
 
         this.future = FutureUtils.createFuture();
@@ -76,8 +85,25 @@ class RocksCheckpointInprogress implements Runnable, FutureEventListener<List<Ro
                 new IOException("Failed to create a rocksdb checkpoint at " + path, e));
             return;
         }
-        // 2. copy all the files
         this.files = path.listFiles();
+        this.checkpointLog.writeCommand(
+            RocksUtils.newBeginCheckpointCommand(checkpointName, checkpointId, files)
+        ).whenCompleteAsync(new FutureEventListener<Long>() {
+            @Override
+            public void onSuccess(Long txId) {
+                checkpointId = txId;
+                copyFiles();
+            }
+
+            @Override
+            public void onFailure(Throwable throwable) {
+                FutureUtils.completeExceptionally(future, throwable);
+            }
+        }, ioScheduler);
+    }
+
+    private void copyFiles() {
+        // 2. copy all the files
         this.copyTasks = Lists.newArrayListWithExpectedSize(files.length);
         for (File file : files) {
             if (file.getName().endsWith(".sst")) {
@@ -95,21 +121,44 @@ class RocksCheckpointInprogress implements Runnable, FutureEventListener<List<Ro
 
     @Override
     public void onSuccess(List<RocksFileInfo> fis) {
+        checkpointLog.writeCommand(newCommitCheckpointCommand(checkpointName, checkpointId))
+            .whenCompleteAsync(new FutureEventListener<Long>() {
+                @Override
+                public void onSuccess(Long txId) {
+                    commitCheckpoint(fis);
+                }
+
+                @Override
+                public void onFailure(Throwable throwable) {
+                    FutureUtils.completeExceptionally(future, throwable);
+                }
+            }, ioScheduler);
+    }
+
+    private void commitCheckpoint(List<RocksFileInfo> fis) {
         // generate a checkpoint result
         ImmutableMap.Builder<String, RocksFileInfo> builder = ImmutableMap.builder();
         for (RocksFileInfo fi : fis) {
             builder.put(fi.getName(), fi);
         }
-        RocksCheckpoint rc = new RocksCheckpoint(builder.build());
+        RocksCheckpoint rc = new RocksCheckpoint(
+            RocksCheckpointState.COMMIT,
+            builder.build());
         future.complete(rc);
     }
 
     @Override
     public void onFailure(Throwable throwable) {
-        // fail to create a checkpoint, rollback
-        FutureUtils.ensure(
-            rollbackCheckpoint(),
-            () -> future.completeExceptionally(throwable));
+        FutureUtils.proxyTo(
+            checkpointLog.writeCommand(newAbortingCheckpointCommand(checkpointName, checkpointId))
+                .thenComposeAsync(ignored ->
+                    rollbackCheckpoint(), ioScheduler)
+                .thenComposeAsync(ignored ->
+                    checkpointLog.writeCommand(newAbortedCheckpointCommand(checkpointName, checkpointId)), ioScheduler)
+                .thenApplyAsync(ignored ->
+                    new RocksCheckpoint(RocksCheckpointState.ABORTED, ImmutableMap.of())),
+            future
+        );
     }
 
     private CompletableFuture<Void> rollbackCheckpoint() {

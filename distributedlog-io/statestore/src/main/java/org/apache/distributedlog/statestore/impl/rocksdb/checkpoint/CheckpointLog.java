@@ -18,22 +18,15 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
-import com.google.common.collect.ImmutableMap;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.RequiredArgsConstructor;
-import lombok.ToString;
+import java.util.concurrent.CompletableFuture;
+import org.apache.distributedlog.io.AsyncCloseable;
+import org.apache.distributedlog.statestore.proto.CheckpointCommand;
 
 /**
- * A checkpoint represents a state for a rocks db instance.
+ * A log that tracks all the metadata changes on checkpoints.
  */
-@Data
-@RequiredArgsConstructor
-@EqualsAndHashCode
-@ToString
-class RocksCheckpoint {
+public interface CheckpointLog extends AsyncCloseable {
 
-    private final RocksCheckpointState state;
-    private final ImmutableMap<String, RocksFileInfo> files;
+    CompletableFuture<Long> writeCommand(CheckpointCommand command);
 
 }

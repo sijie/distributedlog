@@ -18,22 +18,11 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
-import com.google.common.collect.ImmutableMap;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.RequiredArgsConstructor;
-import lombok.ToString;
-
 /**
- * A checkpoint represents a state for a rocks db instance.
+ * Managers on managing all the checkpoints.
  */
-@Data
-@RequiredArgsConstructor
-@EqualsAndHashCode
-@ToString
-class RocksCheckpoint {
+class RocksCheckpointManager {
 
-    private final RocksCheckpointState state;
-    private final ImmutableMap<String, RocksFileInfo> files;
+
 
 }

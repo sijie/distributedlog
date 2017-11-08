@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
@@ -52,6 +53,7 @@ class LedgerCopier implements Runnable {
     private final int ensembleSize;
     private final int writeQuorumSize;
     private final int ackQuorumSize;
+    private final Optional<WriteHandle> whOptional;
 
     // state
     private AtomicReference<Throwable> lastException = new AtomicReference<>(null);
@@ -64,7 +66,8 @@ class LedgerCopier implements Runnable {
                  ScheduledExecutorService ioScheduler,
                  int ensmebleSize,
                  int writeQuorumSize,
-                 int ackQuorumSize) {
+                 int ackQuorumSize,
+                 Optional<WriteHandle> whOptional) {
         this.name = name;
         this.bkc = bkc;
         this.srcFile = srcFile;
@@ -73,6 +76,7 @@ class LedgerCopier implements Runnable {
         this.ensembleSize = ensmebleSize;
         this.writeQuorumSize = writeQuorumSize;
         this.ackQuorumSize = ackQuorumSize;
+        this.whOptional = whOptional;
 
         // register an ensure block to clean up resources
         FutureUtils.ensure(this.future, () -> cleanup());
@@ -103,6 +107,11 @@ class LedgerCopier implements Runnable {
             return;
         }
         // 2. create the dest ledger
+        if (whOptional.isPresent()) {
+            copyData(whOptional.get());
+            return;
+        }
+
         CompletableFuture<WriteHandle> openFuture = this.bkc.newCreateLedgerOp()
             .withPassword(new byte[0])
             .withDigestType(DigestType.CRC32)

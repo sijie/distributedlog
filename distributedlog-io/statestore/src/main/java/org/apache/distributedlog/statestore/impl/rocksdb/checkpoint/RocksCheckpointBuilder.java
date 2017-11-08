@@ -18,22 +18,36 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
 import com.google.common.collect.ImmutableMap;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.RequiredArgsConstructor;
-import lombok.ToString;
+import com.google.common.collect.Maps;
+import java.util.Map;
 
-/**
- * A checkpoint represents a state for a rocks db instance.
- */
-@Data
-@RequiredArgsConstructor
-@EqualsAndHashCode
-@ToString
-class RocksCheckpoint {
+class RocksCheckpointBuilder {
 
-    private final RocksCheckpointState state;
-    private final ImmutableMap<String, RocksFileInfo> files;
+    private final Map<String, RocksFileInfo> files;
+    private RocksCheckpointState state;
+
+    RocksCheckpointBuilder() {
+        this.files = Maps.newHashMap();
+    }
+
+    synchronized RocksCheckpointBuilder add(String name, RocksFileInfo fi) {
+        files.put(name, fi);
+        return this;
+    }
+
+    synchronized RocksCheckpointBuilder setState(RocksCheckpointState state) {
+        this.state = state;
+        return this;
+    }
+
+    synchronized RocksCheckpoint complete() {
+        checkArgument(RocksCheckpointState.COMMIT == state);
+        return new RocksCheckpoint(
+            state,
+            ImmutableMap.copyOf(files));
+    }
 
 }

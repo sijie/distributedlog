@@ -18,6 +18,9 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
+import static org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils.NOP_CMD;
+import static org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils.newCheckpointCommand;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -27,12 +30,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
+import javax.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.bookkeeper.common.concurrent.FutureEventListener;
+import org.apache.bookkeeper.common.concurrent.FutureUtils;
 import org.apache.bookkeeper.util.HardLink;
 import org.apache.commons.io.FileUtils;
-import org.apache.distributedlog.common.concurrent.FutureEventListener;
-import org.apache.distributedlog.common.concurrent.FutureUtils;
+import org.apache.distributedlog.DLSN;
+import org.apache.distributedlog.LogRecordWithDLSN;
+import org.apache.distributedlog.api.DistributedLogManager;
+import org.apache.distributedlog.api.LogReader;
 import org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils;
+import org.apache.distributedlog.statestore.proto.CheckpointCommand;
 import org.rocksdb.Checkpoint;
 
 /**
@@ -49,6 +59,9 @@ class RocksCheckpoints implements AutoCloseable {
     private final Map<String, CompletableFuture<RocksCheckpoint>> inprogressCheckpoints;
     private final Map<String, CompletableFuture<Void>> deleteCheckpoints;
 
+    // journal the checkpoint metadata updates
+    private DLCheckpointLog checkpointLog;
+
     RocksCheckpoints(Checkpoint checkpoint,
                      File checkpointDir,
                      RocksFiles rocksFiles,
@@ -61,6 +74,83 @@ class RocksCheckpoints implements AutoCloseable {
         this.inprogressCheckpoints = Maps.newHashMap();
         this.deleteCheckpoints = Maps.newHashMap();
     }
+
+    //
+    // Checkpoint Metadata
+    //
+
+    CompletableFuture<Void> init(@Nullable DistributedLogManager logManager) {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        executor.submit(() -> {
+            this.initCheckpointLog(logManager).whenCompleteAsync(new FutureEventListener<Long>() {
+                @Override
+                public void onSuccess(Long lastTxId) {
+                    try {
+                        replayCheckpointLog(logManager, lastTxId);
+                        FutureUtils.complete(future, null);
+                    } catch (IOException e) {
+                        FutureUtils.completeExceptionally(future, e);
+                    }
+                }
+
+                @Override
+                public void onFailure(Throwable throwable) {
+                    FutureUtils.completeExceptionally(future, throwable);
+                }
+            });
+        }, executor);
+        return future;
+    }
+
+    private CompletableFuture<Long> initCheckpointLog(DistributedLogManager logManager) {
+        return logManager.openAsyncLogWriter().thenComposeAsync(writer -> {
+            this.checkpointLog = new DLCheckpointLog(
+                logManager,
+                writer,
+                executor);
+            return this.checkpointLog.writeCommand(NOP_CMD);
+        }, executor);
+    }
+
+    private void replayCheckpointLog(DistributedLogManager logManager, long endTxId)
+            throws IOException {
+        LogReader reader = logManager.openLogReader(DLSN.InitialDLSN);
+        try {
+            replayCheckpointLog(reader, endTxId);
+        } finally {
+            reader.close();
+        }
+    }
+
+    private void replayCheckpointLog(LogReader reader, long endTxId) throws IOException {
+        Map<String, RocksCheckpointBuilder> inprogressCheckpoints;
+        Map<String, RocksCheckpoint> completedCheckpoints;
+        AtomicBoolean restoreSnapshot = new AtomicBoolean(false);
+
+        LogRecordWithDLSN record;
+        while (true) {
+            record = reader.readNext(false);
+            if (null == record) {
+                throw new IOException("No record found in checkpoint log");
+            }
+
+            CheckpointCommand command = newCheckpointCommand(record.getPayloadBuf());
+            switch (command.getCmdCase()) {
+                case NOP_CMD:
+                    return;
+                // restore snapshot commands
+
+            }
+
+            if (record.getTransactionId() >= endTxId) {
+                break;
+            }
+        }
+    }
+
+    //
+    // Checkpoints
+    //
 
     @VisibleForTesting
     RocksCheckpoint getCompletedCheckpoint(String name) {
@@ -93,6 +183,7 @@ class RocksCheckpoints implements AutoCloseable {
                 name,
                 new File(checkpointDir, name),
                 rocksFiles,
+                checkpointLog,
                 executor);
         executor.submit(inprogress);
         inprogress.future().whenCompleteAsync(new FutureEventListener<RocksCheckpoint>() {

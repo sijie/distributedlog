@@ -180,3 +180,79 @@ message Command {
         TxnRequest txn_req = 4;
     }
 }
+
+//
+// Checkpoint Manager
+//
+
+message RocksFileInfo {
+    string file_name = 1;
+    int64 ledger_id = 2;
+}
+
+message NopCommand {
+}
+
+message BeginCheckpointCommand {
+    repeated string files       = 1;
+}
+
+message FileCommand {
+    enum State {
+        CREATE          = 0;
+        DELETE          = 1;
+    }
+    State state      = 1;
+    RocksFileInfo fi = 2;
+}
+
+message CommitCheckpointCommand {
+}
+
+message AbortingCheckpointCommand {
+}
+
+message AbortedCheckpointCommand {
+}
+
+message DeletingCheckpointCommand {
+}
+
+message DeletedCheckpointCommand {
+}
+
+message BeginSnapshotCommand {
+}
+
+message CheckpointContent {
+    enum State {
+        BEGIN           = 0;
+        COMMIT          = 1;
+        ABORTING        = 2;
+        ABORTED         = 3;
+        DELETING        = 4;
+        DELETED         = 5;
+    }
+    map<string, RocksFileInfo> file_map = 1;
+}
+
+message EndSnapshotCommand {
+}
+
+message CheckpointCommand {
+    string checkpoint_name      = 1;
+    oneof cmd {
+        NopCommand nop_cmd = 10; 
+        FileCommand file_cmd = 11;
+        BeginCheckpointCommand begin_cmd = 12;
+        CommitCheckpointCommand commit_cmd = 13;
+        AbortingCheckpointCommand aborting_cmd = 14;
+        AbortedCheckpointCommand aborted_cmd = 15;
+        DeletingCheckpointCommand deleting_cmd = 16;
+        DeletedCheckpointCommand deleted_cmd = 17;
+        BeginSnapshotCommand begin_snapshot_cmd = 18;
+        RocksFileInfo rocks_file_info = 19;
+        CheckpointContent checkpoint_content = 20;
+        EndSnapshotCommand end_snapshot_cmd = 21;
+    }
+}

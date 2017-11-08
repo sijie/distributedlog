@@ -31,6 +31,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import lombok.extern.slf4j.Slf4j;
@@ -98,7 +99,8 @@ public class TestLedgerCopierSaver extends TestDistributedLogBase {
             ioScheduler,
             3,
             3,
-            3);
+            3,
+            Optional.empty());
         ioScheduler.submit(copier);
         RocksFileInfo info = result(copier.future());
         assertEquals(emptyFile.getName(), info.getName());
@@ -167,7 +169,8 @@ public class TestLedgerCopierSaver extends TestDistributedLogBase {
             ioScheduler,
             3,
             3,
-            3);
+            3,
+            Optional.empty());
         ioScheduler.submit(copier);
         RocksFileInfo info = result(copier.future());
         assertEquals(srcFile.getName(), info.getName());

@@ -47,6 +47,7 @@ public class TestRocksdbCheckpointBase extends TestRocksdbBase {
             bk,
             ioScheduler,
             3);
+
     }
 
     @Override

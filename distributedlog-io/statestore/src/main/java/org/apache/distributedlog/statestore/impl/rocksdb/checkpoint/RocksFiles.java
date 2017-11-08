@@ -18,16 +18,23 @@
 
 package org.apache.distributedlog.statestore.impl.rocksdb.checkpoint;
 
+import static org.apache.distributedlog.statestore.impl.rocksdb.RocksUtils.newFileCommand;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
 import java.io.File;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import org.apache.bookkeeper.client.api.BookKeeper;
+import org.apache.bookkeeper.client.api.DigestType;
+import org.apache.bookkeeper.client.api.WriteHandle;
 import org.apache.bookkeeper.common.concurrent.FutureEventListener;
 import org.apache.bookkeeper.common.concurrent.FutureUtils;
+import org.apache.distributedlog.statestore.proto.FileCommand.State;
 
 /**
  * Manage all the rocksdb files.
@@ -38,6 +45,8 @@ class RocksFiles {
     private final ScheduledExecutorService executor;
     private final int numReplicas;
 
+    private CheckpointLog checkpointLog;
+    // `completedSstFiles` tracks all the completed sst files we are copying
     private final Map<String, RocksFileInfo> completedSstFiles;
     private final Map<String, CompletableFuture<RocksFileInfo>> inprogressSstFiles;
 
@@ -49,6 +58,24 @@ class RocksFiles {
         this.numReplicas = numReplicas;
         this.completedSstFiles = Collections.synchronizedMap(Maps.newHashMap());
         this.inprogressSstFiles = Collections.synchronizedMap(Maps.newHashMap());
+    }
+
+    synchronized void start(CheckpointLog checkpointLog,
+                            Map<String, RocksFileInfo> completedSstFiles,
+                            Set<RocksFileInfo> sstFilesToDelete) {
+        this.checkpointLog = checkpointLog;
+        this.completedSstFiles.putAll(completedSstFiles);
+        for (RocksFileInfo fi : sstFilesToDelete) {
+            deleteSstFile(fi);
+        }
+    }
+
+    /**
+     * Create a snapshot of current state
+     * @return
+     */
+    CompletableFuture<Void> snapshot() {
+
     }
 
     BookKeeper getBk() {
@@ -63,12 +90,7 @@ class RocksFiles {
     CompletableFuture<RocksFileInfo> copySstFile(String checkpointName, String name, File file) {
         final CompletableFuture<RocksFileInfo> future;
         synchronized (this) {
-            RocksFileInfo fileInfo = getSstFileInfo(name);
-            if (null != fileInfo) {
-                fileInfo.link(checkpointName);
-                return FutureUtils.value(fileInfo);
-            }
-            // no sst file is available, schedule a copy task
+            // check if there is any inprogress copying happening, if there are waiting.
             CompletableFuture<RocksFileInfo> localFuture = inprogressSstFiles.get(name);
             if (null != localFuture) {
                 return localFuture.thenApply(f -> {
@@ -76,18 +98,69 @@ class RocksFiles {
                     return f;
                 });
             }
+
+            // check if there is already a file copied.
+            RocksFileInfo fileInfo = getSstFileInfo(name);
+            if (null != fileInfo) {
+                fileInfo.link(checkpointName);
+                return FutureUtils.value(fileInfo);
+            }
+
             future = FutureUtils.createFuture();
             inprogressSstFiles.put(name, future);
         }
 
-        LedgerCopier copier = new LedgerCopier(
-            bk,
-            name,
-            file,
-            executor,
-            numReplicas,
-            numReplicas,
-            numReplicas);
+        CompletableFuture<WriteHandle> openFuture = this.bk.newCreateLedgerOp()
+            .withPassword(new byte[0])
+            .withDigestType(DigestType.CRC32)
+            .withEnsembleSize(numReplicas)
+            .withWriteQuorumSize(numReplicas)
+            .withAckQuorumSize(numReplicas)
+            .execute();
+        openFuture
+            .thenComposeAsync(wh ->
+                checkpointLog.writeCommand(
+                    newFileCommand(checkpointName, name, wh.getId(), State.CREATE)
+                ).thenApply(ignored -> wh)
+            )
+            .whenCompleteAsync(new FutureEventListener<WriteHandle>() {
+                @Override
+                public void onSuccess(WriteHandle wh) {
+                    copySstFile(name, file, wh, future);
+                }
+
+                @Override
+                public void onFailure(Throwable throwable) {
+                    synchronized (RocksFiles.this) {
+                        inprogressSstFiles.remove(name, future);
+                    }
+                    future.completeExceptionally(throwable);
+                }
+            });
+        return future.thenApply(f -> {
+            f.link(checkpointName);
+            return f;
+        });
+    }
+
+    void copySstFile(String name,
+                     File file,
+                     WriteHandle wh,
+                     CompletableFuture<RocksFileInfo> future) {
+        LedgerCopier copier;
+        synchronized (this) {
+            copier = new LedgerCopier(
+                bk,
+                name,
+                file,
+                executor,
+                numReplicas,
+                numReplicas,
+                numReplicas,
+                Optional.of(wh)
+            );
+        }
+
         executor.submit(copier);
         copier.future().whenCompleteAsync(new FutureEventListener<RocksFileInfo>() {
             @Override
@@ -107,10 +180,6 @@ class RocksFiles {
                 future.completeExceptionally(throwable);
             }
         }, executor);
-        return future.thenApply(f -> {
-            f.link(checkpointName);
-            return f;
-        });
     }
 
     CompletableFuture<RocksFileInfo> deleteSstFile(String checkpointName, String name) {
